@@ -58,7 +58,7 @@ The skill should never let a tool define the problem prematurely.
 
 ## Session Memory
 
-The web database (via `project-sync` skill) is the canonical source for project state. All satellite skills read from and write to the database.
+The FeatBit API database is the canonical source for project state. All satellite skills read from and write to it through the configured FeatBit experimentation MCP server.
 
 Optionally maintain `.featbit-release-decision/intent.md` as a human-readable working state for local visibility, but the database is the source of truth.
 
@@ -83,19 +83,19 @@ This is not a log. It is the current decision state.
 
 Use `camelCase` for all field keys.
 
-## Project Sync Rules
+## MCP State Rules
 
 Every stage transition must persist state to the database before handing off to the next skill.
 
-All satellite skills use the `project-sync` skill to read and write state. The required pattern:
+All satellite skills use FeatBit experimentation MCP tools to read and write state. The required pattern:
 
-1. **Read** — use `get-experiment` to load current state on entry
-2. **Write state** — use `update-state` to persist field values
-3. **Advance stage** — use `set-stage` to move the lifecycle forward
-4. **Log transition** — use `add-activity` to record what happened
-5. **Experiment data** — use run-level commands (`create-run`, `start-run`, `analyze-run`, `decide-run`, `archive-run`, `save-input`, `save-result`, `record-decision`, `save-learning`) when experiment run records change
+1. **Read** — call `featbit_release_decision_get_experiment` on entry.
+2. **Write state** — call `featbit_release_decision_update_experiment` or `featbit_release_decision_update_metrics`.
+3. **Advance stage** — call `featbit_release_decision_set_stage`.
+4. **Experiment data** — call `featbit_release_decision_create_run`, `featbit_release_decision_update_run`, or `featbit_release_decision_analyze_run` when run records change.
+5. **Conversation memory** — call `featbit_release_decision_add_message` only for user-visible conversation or durable decision notes.
 
-See the `project-sync` skill for full command reference. Set `SYNC_API_URL` if the web app is not at `https://www.featbit.ai`.
+The MCP client configuration must provide normal FeatBit auth headers: `Authorization`, `Organization`, and `Workspace`. Do not pass a per-experiment access token to the skill.
 
 ---
 
@@ -260,7 +260,7 @@ Concrete methods, tools, and executable procedures live in these implementation 
 | `evidence-analysis` | CF-06, CF-07 | Evidence sufficiency check and decision framing |
 | `learning-capture` | CF-08 | Structured learning synthesis and next-cycle seeding |
 | `experiment-workspace` | CF-05, CF-06 | Experiment record management, data collection, analysis execution |
-| `project-sync` | _(utility)_ | Persist state to web DB — called by all satellite skills |
+| `project-sync` | _(deprecated utility)_ | Migration note only; new skills use FeatBit experimentation MCP tools |
 
 The purpose of this `release-decision` skill is to decide **which domain should be activated now**, not to be the implementation manual for all of them.
 
@@ -282,41 +282,34 @@ For a detailed routing guide, see [references/skill-routing-guide.md](references
 
 ## Entry Protocol
 
-### Project credentials
+### Project context
 
-Two parameters are passed as invocation arguments when the slash command is activated:
+One parameter is passed as the invocation argument when the slash command is activated:
 
-- `project-id` — the unique project identifier in the web app
-- `access-token` — (optional) the API token for the `project-sync` skill
+- `experiment-id` — the release-decision experiment identifier in FeatBit
+
+The current FeatBit environment id must come from the MCP client/session context, the web page context, or the user's prompt. If it is missing, ask for `envId` before reading or writing experiment data.
 
 Invocation pattern:
 ```
-/featbit-release-decision <experiment-id> [access-token]
+/featbit-release-decision <experiment-id>
 ```
 
-Parse `project-id` and `access-token` from the starting prompt. If `project-id` is missing, ask the user before proceeding. If `access-token` is missing or empty, proceed without it — only ask for it later if a database write operation actually requires authentication.
-
-### Skill path bootstrap
-
-Once per session, before invoking any sub-skill script, run this bash command to make sure `$HOME/.claude/skills` resolves to the actual skills directory (needed on sandbox0 managed-agents VMs where skills live at `/workspace/.claude/skills`; on Docker/local it is a no-op because the path already exists):
-
-```bash
-[ -d "$HOME/.claude/skills" ] || { mkdir -p "$HOME/.claude" && ln -sfn /workspace/.claude/skills "$HOME/.claude/skills"; }
-```
+Parse `experiment-id` from the starting prompt. If it is missing, ask the user before proceeding.
 
 ### State loading
 
-Before asking or saying anything, read the current project state from the database using the `project-sync` skill's `get-experiment` command with the `project-id` parsed from the invocation arguments.
+Before asking or saying anything, read the current project state using `featbit_release_decision_get_experiment` with `envId` and `experiment-id`.
 
-If the command returns `"status": "unavailable"`, the database is unreachable. Retry the call **once** — transient container/network timing at session start is common. If the retry still fails, treat this exactly like a blank new project and proceed with the greeting — do not diagnose, do not mention the database.
+If the MCP call fails because the server is unreachable, retry **once**. If the retry still fails, treat this exactly like a blank new project and proceed with the greeting — do not diagnose, do not mention the database.
 
-If the user later asserts that you *can* reach the database (e.g. "yes you can, you have the scripts"), run `get-experiment` again before telling them otherwise. The sandbox has `npx tsx $HOME/.claude/skills/project-sync/scripts/sync.ts get-experiment <id>` available and `SYNC_API_URL` pre-wired — a single earlier failure is not a verdict.
+If the user later asserts that you *can* reach the database, call `featbit_release_decision_get_experiment` again before telling them otherwise. A single earlier failure is not a verdict.
 
 Treat the project as a blank new project when the decision fields are empty and there are no meaningful experiments or learnings yet.
 
 ### Expert-mode recognition
 
-`get-experiment` returns two fields that change how the session should start:
+`featbit_release_decision_get_experiment` returns two fields that change how the session should start:
 
 | Field | Meaning |
 |---|---|
@@ -335,41 +328,13 @@ When `entryMode === "guided"` or null, use the original blank-project or state-r
 
 ### Product Context Loading (silent)
 
-After `get-experiment` resolves `featbitProjectKey`, silently fetch `product_facts` so hypotheses and metrics can be grounded in what the product actually is and who uses it. Use the same `SYNC_API_URL` that `project-sync` uses (it points to the correct web-app host for this deployment — never hardcode `http://web:3000` or `localhost`):
-
-```bash
-curl -s "${SYNC_API_URL:-https://www.featbit.ai}/api/memory/project/${featbit_project_key}?type=product_facts"
-```
-
-Keep the parsed JSON as internal context (`_productFacts`). Never mention this loading step to the user. Do **NOT** read `type=learnings` — cross-experiment conflict checking uses the dedicated `/conflicts` endpoint instead (see Pre-Start Conflict Check below).
+After the MCP read resolves `featbitProjectKey`, use any configured product-context MCP resource or tool if available. If no product-context MCP capability is configured, skip product facts silently. Never hardcode `http://web:3000`, `localhost`, or a web-app memory endpoint.
 
 ### Pre-Start Conflict Check
 
-Before the user commits to starting an experiment run (i.e., before `experiment-workspace` invokes `start-run`), check whether the configured flag key, primary metric, audience, and observation window conflict with any already-active experiments:
+Before the user commits to starting an experiment run, check for conflicts only if the configured MCP server exposes a conflict-check tool. If no such tool is available, proceed without claiming that a conflict scan was performed.
 
-```bash
-curl -s "${SYNC_API_URL:-https://www.featbit.ai}/api/experiments/${experiment_id}/conflicts"
-```
-
-The response shape:
-
-```json
-{
-  "experimentId": "...",
-  "scannedCount": 5,
-  "hasConflicts": true,
-  "conflicts": [
-    {
-      "experimentName": "Pricing Page Conversion",
-      "severity": "high",
-      "dimensions": ["flag_key", "metric"],
-      "details": ["Both experiments use the same feature flag: ...", "..."]
-    }
-  ]
-}
-```
-
-If `hasConflicts` is true, surface the conflicts concisely to the user **before** dispatching to `start-run`:
+If `hasConflicts` is true, surface the conflicts concisely to the user **before** starting data collection:
 
 > **Heads up — conflicts detected:**
 > - "Pricing Page Conversion" (high) — shared flag `pricing-page-redesign`; same primary metric
@@ -399,10 +364,10 @@ Preferred opening for a blank new project:
 
 If the user is resuming the same conversation but asks to start again, and the project is still blank, apply the same concise opening instead of recapping state again.
 
-If the project already has meaningful state **AND the `messages` array from `get-experiment` is non-empty** (the user is rejoining an existing conversation — its history is already visible in the UI above):
+If the project already has meaningful state **AND the `messages` array from the MCP experiment read is non-empty** (the user is rejoining an existing conversation — its history is already visible in the UI above):
 
 - **Do not produce any greeting, recap, or opening question.** The user can see the prior conversation; re-stating it is noise.
-- Load state silently (get-experiment + product_facts) and then emit no user-visible output at all.
+- Load state silently, optionally load product facts through MCP if available, and then emit no user-visible output at all.
 - Wait for the user's next prompt before speaking.
 
 If the project already has meaningful state **AND `messages` is empty** (state was populated via expert-setup wizard or direct DB writes, not through a chat — the user has no prior conversation to look at):
@@ -422,24 +387,22 @@ Identify which control lenses are relevant based on the project state and the us
 ## Execution Procedure
 
 ```python
-SYNC = env("SYNC_API_URL", default="https://www.featbit.ai")
-
 def on_session_start(argv, user_message):
-    project_id, access_token = parse_args(argv)
-    assert project_id, "project-id is required — ask the user if missing"
-    if access_token:
-        set_env("ACCESS_TOKEN", access_token)
-    state = Skill("project-sync", f"get-experiment {project_id}")
+    experiment_id = parse_experiment_id(argv)
+    env_id = resolve_env_id_from_context_or_user()
+    assert experiment_id, "experiment-id is required — ask the user if missing"
+    assert env_id, "envId is required — ask the user if missing"
+    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
     if state.status == "unavailable":
-        state = Skill("project-sync", f"get-experiment {project_id}")  # retry once
+        state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)  # retry once
     if state.status == "unavailable" or is_blank_project(state):
         greet_blank()
         ask_user("What are you trying to improve or learn?")
         return
 
     # Silent: ground future hypothesis/metric suggestions in the actual product.
-    if state.featbitProjectKey:
-        _productFacts = http_get(f"{SYNC}/api/memory/project/{state.featbitProjectKey}?type=product_facts")
+    if state.featbitProjectKey and MCP.has_tool("featbit_product_context_get_facts"):
+        _productFacts = MCP("featbit_product_context_get_facts", projectKey=state.featbitProjectKey)
 
     # Expert-mode shortcut: user completed the setup wizard; skip shaping
     # questions and acknowledge what they configured directly.
@@ -460,8 +423,8 @@ def on_user_turn(project_id, state, message):
 
     # Conflict check right before starting an experiment run.
     if lens == "CF-05/CF-06" and about_to_start_run(message, state):
-        res = http_get(f"{SYNC}/api/experiments/{project_id}/conflicts")
-        if res.hasConflicts:
+        res = MCP("featbit_release_decision_check_conflicts", envId=env_id, experimentId=experiment_id) if MCP.has_tool("featbit_release_decision_check_conflicts") else None
+        if res and res.hasConflicts:
             warn_conflicts_to_user(res.conflicts)   # concise, one line each
 
     satellite, args = dispatch[lens](project_id, state, message)
@@ -479,7 +442,7 @@ def on_user_turn(project_id, state, message):
 | CF-05 / CF-06 | `experiment-workspace` | Instrumentation confirmed; user wants to start/run/close an experiment. Also: `entryMode === "expert"` with populated `inputData` → go here to run analysis on the pasted data. |
 | CF-06 / CF-07 | `evidence-analysis` | Data is being collected; user asks "analyze results", "is it enough", "continue or rollback". Also: `entryMode === "expert"` with populated `inputData` — data is already in, jump straight here. |
 | CF-08 | `learning-capture` | A decision exists; user says "what did we learn", "close this", "next iteration" |
-| _(any)_ | `project-sync` | Always — satellite skills invoke this internally; hub does not call it directly |
+| _(any)_ | FeatBit experimentation MCP | Always — satellite skills read/write through configured MCP tools |
 
 ---
 

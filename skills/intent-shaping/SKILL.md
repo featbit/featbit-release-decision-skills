@@ -23,7 +23,7 @@ Its job is to extract a real, measurable business outcome from a vague or tactic
 
 ## On Entry — Read Current State
 
-Use the `project-sync` skill's `get-experiment` command to load the current project state from the database. Check:
+Call `featbit_release_decision_get_experiment` through the configured FeatBit experimentation MCP server to load the current experiment state. Check:
 
 - `goal` and `intent` — are they already filled from a previous cycle? If so, confirm with the user whether to refine or start fresh.
 - `lastLearning` — was there a prior cycle? Use it as context for the new intent.
@@ -65,12 +65,15 @@ Confirm the goal belongs to this iteration — not a 6-month vision.
 
 ### Persist State
 
-Use `Skill("project-sync", ...)` to sync state to the web database. All three writes are required:
+Use FeatBit experimentation MCP tools to sync state. Both writes are required:
 
 ```python
-assert Skill("project-sync", f'update-state {experiment_id} --goal "..." --intent "..." --lastAction "Intent clarified"').ok
-assert Skill("project-sync", f"set-stage {experiment_id} intent").ok
-assert Skill("project-sync", f'add-activity {experiment_id} --type stage_update --title "Intent clarified"').ok
+MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    "goal": "...",
+    "intent": "...",
+    "lastAction": "Intent clarified",
+})
+MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="intent")
 ```
 
 **Terminology note:** `goal` and `intent` overlap intentionally. `goal` = the measurable business outcome. `intent` = what the user said they wanted to improve or learn (may still be broad). Both are written at this stage.
@@ -78,11 +81,11 @@ assert Skill("project-sync", f'add-activity {experiment_id} --type stage_update 
 ## Execution Procedure
 
 ```python
-def shape_intent(project_id, user_message):
-    state = Skill("project-sync", f"get-experiment {project_id}")
+def shape_intent(env_id, experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
     if not is_blank_intent(state) and not user_wants_reset(user_message):
         # goal and intent already set — hand off rather than overwrite
-        Skill("hypothesis-design", project_id)
+        Skill("hypothesis-design", experiment_id)
         return
     patterns = read("references/goal-extraction-patterns.md")
     # extraction loop: ask one question at a time until goal is measurable
@@ -91,10 +94,13 @@ def shape_intent(project_id, user_message):
     # scope check → confirm this is an iteration goal, not a 6-month vision
     goal = extract_goal(user_message, patterns)
     intent = user_message  # preserve the original phrasing
-    assert Skill("project-sync", f'update-state {project_id} --goal "{goal}" --intent "{intent}" --lastAction "Intent clarified"').ok
-    assert Skill("project-sync", f"set-stage {project_id} intent").ok
-    assert Skill("project-sync", f'add-activity {project_id} --type stage_update --title "Intent clarified"').ok
-    Skill("hypothesis-design", project_id)
+    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+        "goal": goal,
+        "intent": intent,
+        "lastAction": "Intent clarified",
+    })
+    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="intent")
+    Skill("hypothesis-design", experiment_id)
 ```
 
 ## Signal Inference

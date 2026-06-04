@@ -74,7 +74,7 @@ These are guidelines, not rules. Business context, guardrail health, and traffic
 
 ## After Making a Decision
 
-1. Persist the decision to the database via `project-sync` `upsert-experiment` (`--decision` + `--decisionSummary` + `--decisionReason`)
+1. Persist the decision to the database via `featbit_release_decision_update_run` (`decision`, `decisionSummary`, `decisionReason`, and `status: "decided"`)
 2. If **CONTINUE**: run the rollout expansion command via `tool-featbit-cli.md`
 3. If **ROLLBACK CANDIDATE**: disable the flag immediately, then archive the experiment
 4. If **INCONCLUSIVE**: extend the window or close without action and document why

@@ -25,7 +25,7 @@ These two control principles are handled together because they represent a singl
 
 ## On Entry — Read Current State
 
-Before doing any work, read the project from the database using the `project-sync` skill's `get-experiment` command.
+Before doing any work, call `featbit_release_decision_get_experiment` through the configured FeatBit experimentation MCP server.
 
 Check these fields:
 
@@ -123,23 +123,25 @@ Use this path only if the current user can change application code. If not, crea
 
 ### Persist State
 
-Use `Skill("project-sync", ...)` to sync state. All three writes are required:
+Use FeatBit experimentation MCP tools to sync state. Both writes are required:
 
 ```python
-assert Skill("project-sync", f'update-state {experiment_id} --constraints "{flag_contract_and_rollout}" --lastAction "{what_was_done}"').ok
-assert Skill("project-sync", f"set-stage {experiment_id} implementing").ok
+MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    "constraints": flag_contract_and_rollout,
+    "lastAction": what_was_done,
+})
+MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="implementing")
 # Note: only two valid stages apply here: "implementing" (flag contract defined, not yet live)
 # Stage stays at "implementing" throughout; there is no "exposing" stage value.
-assert Skill("project-sync", f'add-activity {experiment_id} --type stage_update --title "Flag contract ready"').ok
 ```
 
 ## Execution Procedure
 
 ```python
-def control_exposure(project_id, user_message):
-    state = Skill("project-sync", f"get-experiment {project_id}")
+def control_exposure(env_id, experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
     if state.hypothesis in ("", None):
-        Skill("hypothesis-design", project_id); return
+        Skill("hypothesis-design", experiment_id); return
     role = infer_role(user_message, state)
     # role = "spec_owner" (default) or "operator"
     if role == "spec_owner":
@@ -154,9 +156,11 @@ def control_exposure(project_id, user_message):
         # CF-04: initial rollout % set? protected audiences defined? expansion criteria defined? rollback triggers defined?
         assert cf03_and_cf04_pass(state, intent), "define flag contract and rollout plan before enabling"
         execute_operator_intent(intent, state)
-    assert Skill("project-sync", f'update-state {project_id} --constraints "{constraints}" --lastAction "{action}"').ok
-    assert Skill("project-sync", f"set-stage {project_id} implementing").ok
-    assert Skill("project-sync", f'add-activity {project_id} --type stage_update --title "Flag contract ready"').ok
+    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+        "constraints": constraints,
+        "lastAction": action,
+    })
+    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="implementing")
 ```
 
 ## Signal Inference

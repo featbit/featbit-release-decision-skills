@@ -55,9 +55,7 @@ Every time the web `/analyze` endpoint runs a bandit:
 
 The web app's analyze endpoint picks `bandit` automatically from the run's `method` field — no separate script invocation:
 
-```bash
-npx tsx skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-```
+Call `featbit_release_decision_analyze_run` with `envId`, `experimentId`, `runId`, and `forceFresh: true`.
 
 Reads:
 - Run record from the database (variant names, metric events, `method: "bandit"`)
@@ -132,7 +130,7 @@ PUT /api/v1/envs/{envId}/feature-flags/{flagKey}/targeting
 
 Update the `fallthrough.variations[].rollout` field with the computed ranges.
 
-This step requires FeatBit system integration. Full automation (scheduled reweighting without manual intervention) requires implementing a scheduler that hits the web `/api/experiments/:id/analyze` endpoint periodically and applies the returned weights via the FeatBit API.
+This step requires FeatBit system integration. Full automation (scheduled reweighting without manual intervention) requires implementing a scheduler that calls `featbit_release_decision_analyze_run` periodically and applies the returned weights via the FeatBit API.
 
 > **Book reference** — *Experimentation for Engineers*, Chapter 3: the book describes the full Thompson Sampling feedback loop as a continuous "sample → estimate posterior → allocate → repeat" cycle. The scheduling interval (how often to reweight) is a tuning parameter: shorter intervals react faster but add noise; longer intervals are more stable but slower to adapt.
 
@@ -156,11 +154,9 @@ At this point:
 
 ## Transition to Final Analysis
 
-After stopping, switch the run's `method` to `bayesian_ab` (`project-sync upsert-experiment --method bayesian_ab`) and trigger a final analysis on the full collected dataset:
+After stopping, switch the run's `method` to `bayesian_ab` with `featbit_release_decision_update_run` and trigger a final analysis on the full collected dataset:
 
-```bash
-npx tsx skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-```
+Call `featbit_release_decision_analyze_run` with `forceFresh: true`.
 
 **Important caveat**: bandit experiments produce unequal traffic splits (e.g. 90/10 by the end). This means:
 - The δ (delta) estimate in `analysisResult` is valid but has wider uncertainty than a balanced 50/50 design
@@ -179,6 +175,6 @@ Hand off to `evidence-analysis` with:
 | Phase | Action | Frequency |
 |-------|--------|-----------|
 | Burn-in | Collect data, do not reweight | Until every arm ≥ 100 users |
-| Exploit | Trigger `analyze.ts` (run is on `method: bandit`), apply the returned weights to FeatBit | Every 6–24 hours |
+| Exploit | Trigger `featbit_release_decision_analyze_run` (run is on `method: bandit`), apply the returned weights to FeatBit | Every 6–24 hours |
 | Stopping | `best_arm_probabilities >= 0.95` | Check each cycle |
-| Wrap-up | Switch run to `method: bayesian_ab`, trigger `analyze.ts`, hand off to `evidence-analysis` | Once, after stopping |
+| Wrap-up | Switch run to `method: bayesian_ab`, trigger `featbit_release_decision_analyze_run`, hand off to `evidence-analysis` | Once, after stopping |

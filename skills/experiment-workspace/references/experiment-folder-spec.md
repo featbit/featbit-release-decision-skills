@@ -123,7 +123,7 @@ For **orthogonal** experiments (same user in two independent experiments simulta
 
 ## `inputData` Format
 
-Holds aggregated exposure and conversion counts for every metric and variant. Written by the web `/api/experiments/:id/analyze` endpoint after it queries `track-service`.
+Holds aggregated exposure and conversion counts for every metric and variant. Written by the FeatBit API analysis flow after `featbit_release_decision_analyze_run` queries stats.
 
 ```json
 {
@@ -151,7 +151,7 @@ Rules:
 
 ## `analysisResult` Format
 
-Written by the web `/api/experiments/:id/analyze` endpoint (Bayesian or Bandit selected from the run's `method` field). Example output:
+Written by the FeatBit API analysis flow (Bayesian or Bandit selected from the run's `method` field). Example output:
 
 ```json
 {

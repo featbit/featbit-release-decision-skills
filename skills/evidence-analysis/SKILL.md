@@ -23,7 +23,7 @@ CF-06 and CF-07 are handled together because they represent a continuous decisio
 
 ## On Entry — Read Current State
 
-Before doing any work, read the project from the database using the `project-sync` skill's `get-experiment` command.
+Before doing any work, call `featbit_release_decision_get_experiment` through the configured FeatBit experimentation MCP server.
 
 Check these fields:
 
@@ -45,7 +45,7 @@ Check these fields:
 
 When `experimentRuns[*].inputData` is populated, that JSON *is* the observed data — you do not need track-service, ClickHouse, or live event queries. Parse it directly and use it for analysis.
 
-Trigger analysis by POSTing to `/api/experiments/<experimentId>/analyze` with `{runId}`. The endpoint automatically falls back to the stored `inputData` when `featbitEnvId` / `flagKey` are not wired up (expert-mode experiments with no FeatBit flag). The response includes `dataSource: "live" | "stored"` so you can tell the user where numbers came from.
+Trigger analysis with `featbit_release_decision_analyze_run` and `forceFresh` when the user asks for fresh data. The API falls back to stored `inputData` when live FeatBit stats are not available.
 
 If the user asks "do you have my data?" or "can you see what I entered?", read `inputData` and confirm concretely: event name, per-variant n/k (or n/sum/sum_squares), guardrail events, inverse flags — not "I can't reach the database."
 
@@ -109,23 +109,27 @@ Write a structured decision statement with:
 
 ### Persist State
 
-Use `Skill("project-sync", ...)` to sync state. Stage stays at `measuring` — no stage advance here (the project stage advances to `learning` only when `learning-capture` completes):
+Use FeatBit experimentation MCP tools to sync state. Stage stays at `measuring` — no stage advance here (the project stage advances to `learning` only when `learning-capture` completes):
 
 ```python
-assert Skill("project-sync", f'update-state {experiment_id} --lastAction "Decision: {category}"').ok
-# stage stays at measuring — do NOT call set-stage here
-assert Skill("project-sync", f'record-decision {experiment_id} {slug} --decision {category} --decisionSummary "{summary}" --decisionReason "{reason}"').ok
-assert Skill("project-sync", f'decide-run {experiment_id} {slug}').ok
-assert Skill("project-sync", f'add-activity {experiment_id} --type decision_recorded --title "Decision: {category}"').ok
+MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    "lastAction": f"Decision: {category}",
+})
+MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=run_id, update={
+    "status": "decided",
+    "decision": category,
+    "decisionSummary": summary,
+    "decisionReason": reason,
+})
 ```
 
 ## Execution Procedure
 
 ```python
-def analyze_evidence(project_id, user_message):
-    state = Skill("project-sync", f"get-experiment {project_id}")
+def analyze_evidence(env_id, experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
     if state.primaryMetric in ("", None):
-        Skill("measurement-design", project_id)
+        Skill("measurement-design", experiment_id)
         return
     active_run = pick_active_run(state)  # run in collecting or analyzing status
     # --- 6-check sufficiency gate ---
@@ -139,7 +143,7 @@ def analyze_evidence(project_id, user_message):
     ]
     if any(check.failed for check in checks):
         say(format_insufficiency(checks))
-        return  # do not produce a decision; do not write record-decision
+        return  # do not produce or persist a decision
     # --- 6-rule classification cascade ---
     category = classify(active_run.analysisResult)
     # ROLLBACK: guardrail P(win) <= 5% or primary P(win) <= 5%
@@ -149,11 +153,16 @@ def analyze_evidence(project_id, user_message):
     # INCONCLUSIVE: P(win) 20-80% after full window, or risk both still high
     # lean-control: P(win) < 20% but above ROLLBACK threshold
     summary, reason = build_decision_artifact(category, active_run)
-    assert Skill("project-sync", f'update-state {project_id} --lastAction "Decision: {category}"').ok
-    assert Skill("project-sync", f'record-decision {project_id} {active_run.slug} --decision {category} --decisionSummary "{summary}" --decisionReason "{reason}"').ok
-    assert Skill("project-sync", f'decide-run {project_id} {active_run.slug}').ok
-    assert Skill("project-sync", f'add-activity {project_id} --type decision_recorded --title "Decision: {category}"').ok
-    Skill("learning-capture", project_id)
+    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+        "lastAction": f"Decision: {category}",
+    })
+    MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=active_run.id, update={
+        "status": "decided",
+        "decision": category,
+        "decisionSummary": summary,
+        "decisionReason": reason,
+    })
+    Skill("learning-capture", experiment_id)
 ```
 
 ## Signal Inference

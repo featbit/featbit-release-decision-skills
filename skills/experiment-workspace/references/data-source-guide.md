@@ -42,7 +42,7 @@ Keys:
 Instrumentation code
   → track-service (receives flag_evaluation + metric events)
       → ClickHouse (stores raw events)
-          → web app POST /api/experiments/:id/analyze
+          → FeatBit API analysis via featbit_release_decision_analyze_run
               → POST /api/query/experiment (track-service query endpoint)
                   → assembles inputData + runs analysis
                       → writes inputData + analysisResult to run record
@@ -134,7 +134,7 @@ If `/analyze` returns `{ "status": "no_data", "reason": "zero_users" }`:
 
 ## Verifying Input Data Quality
 
-After triggering analysis, read the `inputData` written back to the run record (via `project-sync get-experiment`) and sanity-check:
+After triggering analysis, read the `inputData` written back to the run record via `featbit_release_decision_get_experiment` and sanity-check:
 
 - Both variant keys match `controlVariant` and `treatmentVariant` in the experiment record
 - `n` values are plausible — not 0, not absurdly high

@@ -49,18 +49,9 @@ Both groups experience identical external conditions — same season, same trend
 
 ## Running Holdout Analysis
 
-Create a separate run for each time checkpoint (via `project-sync create-run`) with a time-stamped slug and the checkpoint's `observationStart` / `observationEnd` dates, then trigger analysis on each:
+Create a separate run for each time checkpoint with `featbit_release_decision_create_run` and `featbit_release_decision_update_run`, using a time-stamped slug and the checkpoint's `observationStart` / `observationEnd` dates, then trigger analysis on each:
 
-```bash
-# 30 days after launch
-npx tsx skills/experiment-workspace/scripts/analyze.ts <experiment-id> <holdout-30d-run-id>
-
-# 60 days after launch
-npx tsx skills/experiment-workspace/scripts/analyze.ts <experiment-id> <holdout-60d-run-id>
-
-# 90 days after launch
-npx tsx skills/experiment-workspace/scripts/analyze.ts <experiment-id> <holdout-90d-run-id>
-```
+Call `featbit_release_decision_analyze_run` for each holdout run with `forceFresh: true`.
 
 Each checkpoint needs its own run record. The run is identical to the original except for `observationStart` / `observationEnd` dates.
 
@@ -136,7 +127,7 @@ Holdout groups sit **after** the A/B or Bandit experiment concludes. They are no
 | Checkpoint | Action |
 |-----------|--------|
 | Launch day | Set feature flag to 95/5; note `launched_at` in experiment record |
-| Day 30 | Trigger analysis on the holdout-30d run via `POST /api/experiments/<experiment-id>/analyze` with `forceFresh:true` |
+| Day 30 | Trigger analysis on the holdout-30d run via `featbit_release_decision_analyze_run` with `forceFresh: true` |
 | Day 60 | Repeat |
 | Day 90 | Repeat; decide whether to fully close the holdout group |
 | Any point | If effect has clearly collapsed, consider rollback investigation |

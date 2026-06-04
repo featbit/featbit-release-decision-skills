@@ -23,7 +23,7 @@ Its job is to produce a reusable learning at the end of every cycle — good, ba
 
 ## On Entry — Read Current State
 
-Before doing any work, read the project from the database using the `project-sync` skill's `get-experiment` command.
+Before doing any work, call `featbit_release_decision_get_experiment` through the configured FeatBit experimentation MCP server.
 
 Check these fields:
 
@@ -57,7 +57,7 @@ Work through each of the five components with the user. Prompt for missing parts
 
 ### Write to decision context
 
-Use the `project-sync` skill to persist the learning to the database (see Persist State below).
+Use FeatBit experimentation MCP tools to persist the learning to the database (see Persist State below).
 
 ### Surface the next hypothesis
 
@@ -74,36 +74,52 @@ The learning must always end with a directional suggestion for what to test next
 
 ### Persist State
 
-Use `Skill("project-sync", ...)` to sync state. All five writes are required:
+Use FeatBit experimentation MCP tools to sync state:
 
 ```python
-assert Skill("project-sync", f'update-state {experiment_id} --lastLearning "{summary}" --lastAction "Learning captured"').ok
-assert Skill("project-sync", f"set-stage {experiment_id} learning").ok
-assert Skill("project-sync", f'save-learning {experiment_id} {slug} --whatChanged "{what_changed}" --whatHappened "{what_happened}" --confirmedOrRefuted "{confirmed_or_refuted}" --whyItHappened "{why}" --nextHypothesis "{next_hypothesis}"').ok
-assert Skill("project-sync", f"archive-run {experiment_id} {slug}").ok
-assert Skill("project-sync", f'add-activity {experiment_id} --type learning_captured --title "Learning captured"').ok
+MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    "lastLearning": summary,
+    "lastAction": "Learning captured",
+})
+MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="learning")
+MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=run_id, update={
+    "status": "archived",
+    "whatChanged": what_changed,
+    "whatHappened": what_happened,
+    "confirmedOrRefuted": confirmed_or_refuted,
+    "whyItHappened": why,
+    "nextHypothesis": next_hypothesis,
+})
 ```
 
 ## Execution Procedure
 
 ```python
-def capture_learning(project_id, user_message):
-    state = Skill("project-sync", f"get-experiment {project_id}")
+def capture_learning(env_id, experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
     active_run = pick_active_run(state)   # run in decided status
     if active_run is None or active_run.decision is None:
-        Skill("evidence-analysis", project_id)
+        Skill("evidence-analysis", experiment_id)
         return
     template = read("references/iteration-synthesis-template.md")
     # 5-part synthesis loop — ask about missing parts one at a time
     learning = build_learning(active_run, state, template, user_message)
     # INCONCLUSIVE cycles still require whyItHappened + nextHypothesis:
     # "we learned this measurement approach was inadequate" is valid and complete
-    assert Skill("project-sync", f'update-state {project_id} --lastLearning "{learning.summary}" --lastAction "Learning captured"').ok
-    assert Skill("project-sync", f"set-stage {project_id} learning").ok
-    assert Skill("project-sync", f'save-learning {project_id} {active_run.slug} --whatChanged "{learning.what_changed}" --whatHappened "{learning.what_happened}" --confirmedOrRefuted "{learning.confirmed_or_refuted}" --whyItHappened "{learning.why}" --nextHypothesis "{learning.next_hypothesis}"').ok
-    assert Skill("project-sync", f"archive-run {project_id} {active_run.slug}").ok
-    assert Skill("project-sync", f'add-activity {project_id} --type learning_captured --title "Learning captured"').ok
-    Skill("intent-shaping", project_id)
+    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+        "lastLearning": learning.summary,
+        "lastAction": "Learning captured",
+    })
+    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="learning")
+    MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=active_run.id, update={
+        "status": "archived",
+        "whatChanged": learning.what_changed,
+        "whatHappened": learning.what_happened,
+        "confirmedOrRefuted": learning.confirmed_or_refuted,
+        "whyItHappened": learning.why,
+        "nextHypothesis": learning.next_hypothesis,
+    })
+    Skill("intent-shaping", experiment_id)
 ```
 
 ## Signal Inference

@@ -23,7 +23,7 @@ Its job is to convert a goal into a testable, falsifiable statement before any i
 
 ## On Entry — Read Current State
 
-Use the `project-sync` skill's `get-experiment` command to load the current project state from the database. Check:
+Call `featbit_release_decision_get_experiment` through the configured FeatBit experimentation MCP server to load the current experiment state. Check:
 
 - `goal` and `intent` — were they set by `intent-shaping`? If empty, go back to `intent-shaping` first.
 - `hypothesis`, `change`, `variants`, `primaryMetric` — are they already filled? If so, verify with the user whether to refine or start fresh.
@@ -69,31 +69,41 @@ The hypothesis does not need a specific number at this stage. It needs a directi
 
 ### Persist State
 
-Use `Skill("project-sync", ...)` to sync state to the web database. All three writes are required:
+Use FeatBit experimentation MCP tools to sync state. Both writes are required:
 
 ```python
-assert Skill("project-sync", f'update-state {experiment_id} --hypothesis "We believe [change] will [move metric] for [audience] because [reason]" --change "[specific change]" --variants "[control (annotation)|treatment (annotation)]" --primaryMetric "[metric name] — [rationale]" --lastAction "Hypothesis formed"').ok
-assert Skill("project-sync", f"set-stage {experiment_id} hypothesis").ok
-assert Skill("project-sync", f'add-activity {experiment_id} --type stage_update --title "Hypothesis formed"').ok
+MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    "hypothesis": "We believe [change] will [move metric] for [audience] because [reason]",
+    "change": "[specific change]",
+    "variants": "[control (annotation)|treatment (annotation)]",
+    "primaryMetric": "[metric name] - [rationale]",
+    "lastAction": "Hypothesis formed",
+})
+MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="hypothesis")
 ```
 
 ## Execution Procedure
 
 ```python
-def design_hypothesis(project_id, user_message):
-    state = Skill("project-sync", f"get-experiment {project_id}")
+def design_hypothesis(env_id, experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
     if state.goal in ("", None):
-        Skill("intent-shaping", project_id)
+        Skill("intent-shaping", experiment_id)
         return
     template = read("references/hypothesis-template.md")
     # fill all 5 components: change, metric, direction, audience, causal reason
     # ask about missing parts one at a time
     # falsifiability check: "under what conditions would we conclude this was wrong?"
     hypothesis = build_hypothesis(state.goal, template, user_message)
-    assert Skill("project-sync", f'update-state {project_id} --hypothesis "{hypothesis.text}" --change "{hypothesis.change}" --variants "{hypothesis.control} (control)|{hypothesis.treatment} (treatment)" --primaryMetric "{hypothesis.metric} — {hypothesis.metric_rationale}" --lastAction "Hypothesis formed"').ok
-    assert Skill("project-sync", f"set-stage {project_id} hypothesis").ok
-    assert Skill("project-sync", f'add-activity {project_id} --type stage_update --title "Hypothesis formed"').ok
-    Skill("reversible-exposure-control", project_id)
+    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+        "hypothesis": hypothesis.text,
+        "change": hypothesis.change,
+        "variants": f"{hypothesis.control} (control)|{hypothesis.treatment} (treatment)",
+        "primaryMetric": f"{hypothesis.metric} - {hypothesis.metric_rationale}",
+        "lastAction": "Hypothesis formed",
+    })
+    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="hypothesis")
+    Skill("reversible-exposure-control", experiment_id)
 ```
 
 ## Signal Inference

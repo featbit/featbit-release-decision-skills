@@ -24,7 +24,7 @@ Its job is to ensure every hypothesis has exactly one primary metric, a small se
 
 ## On Entry — Read Current State
 
-Before doing any work, read the project from the database using the `project-sync` skill's `get-experiment` command.
+Before doing any work, call `featbit_release_decision_get_experiment` through the configured FeatBit experimentation MCP server.
 
 Check these fields:
 
@@ -103,33 +103,30 @@ Check: can the current codebase emit this event? If not, instrumentation must be
 
 ### Persist State
 
-Use `Skill("project-sync", ...)` to sync state. All three writes are required, and instrumentation must be confirmed before writing:
+Use FeatBit experimentation MCP tools to sync state, and confirm instrumentation before writing:
 
-```bash
-PRIMARY='{"name":"Signup conversion","event":"signup_completed","metricType":"binary","metricAgg":"once","description":"Proportion of visitors that sign up."}'
-GUARDRAILS='[{"name":"Checkout abandonment","event":"checkout_abandoned","metricType":"binary","metricAgg":"once","direction":"increase_bad","description":"must not rise"}]'
-
-npx tsx $HOME/.claude/skills/project-sync/scripts/sync.ts update-state <experiment-id> \
-  --primaryMetric "$PRIMARY" \
-  --guardrails "$GUARDRAILS" \
-  --lastAction "Metrics defined"
-npx tsx $HOME/.claude/skills/project-sync/scripts/sync.ts set-stage <experiment-id> measuring
-npx tsx $HOME/.claude/skills/project-sync/scripts/sync.ts add-activity <experiment-id> --type stage_update --title "Metrics defined"
+```python
+MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    "primaryMetric": primary_json,
+    "guardrails": guardrails_json,
+    "lastAction": "Metrics defined",
+})
+MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="measuring")
 ```
 
 **`primaryMetric` must be a JSON object** with `{name, event, metricType, metricAgg, description?}`. The web UI renders each field as its own column (NAME / EVENT / TYPE / AGG) — do NOT jam a paragraph into `name`. Rationale goes in `description`.
 
 **`guardrails` must be a JSON array** of objects with the primary-metric shape plus `direction` (`increase_bad` or `decrease_bad`). One entry per guardrail, never a single string or newline-separated text.
 
-`sync.ts update-state` validates both fields' JSON shape and enums; if validation fails it will print what's missing and exit non-zero.
+The FeatBit API validates both fields' JSON shape and enums; if validation fails, correct the payload and retry once.
 
 ## Execution Procedure
 
 ```python
-def design_measurement(project_id, user_message):
-    state = Skill("project-sync", f"get-experiment {project_id}")
+def design_measurement(env_id, experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
     if state.hypothesis in ("", None):
-        Skill("hypothesis-design", project_id)
+        Skill("hypothesis-design", experiment_id)
         return
     # --- primary metric ---
     # ask: "if you had ONE number to make a go/no-go decision, what is it?"
@@ -161,10 +158,13 @@ def design_measurement(project_id, user_message):
         }
         for g in guardrails
     ])
-    assert Skill("project-sync", f'update-state {project_id} --primaryMetric {shlex.quote(primary_json)} --guardrails {shlex.quote(guardrails_json)} --lastAction "Metrics defined"').ok
-    assert Skill("project-sync", f"set-stage {project_id} measuring").ok
-    assert Skill("project-sync", f'add-activity {project_id} --type stage_update --title "Metrics defined"').ok
-    Skill("reversible-exposure-control", project_id)
+    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+        "primaryMetric": primary_json,
+        "guardrails": guardrails_json,
+        "lastAction": "Metrics defined",
+    })
+    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="measuring")
+    Skill("reversible-exposure-control", experiment_id)
 ```
 
 ## Signal Inference
@@ -174,7 +174,7 @@ def design_measurement(project_id, user_message):
 | `hypothesis` empty | Redirect to `hypothesis-design` |
 | User lists multiple "primary" metrics | Push back — ask which ONE decides the go/no-go |
 | Guardrail count > 3 | Ask which 2–3 matter most; trim the rest to diagnostics |
-| Instrumentation not confirmed | Block stage advance; do not write `set-stage measuring` |
+| Instrumentation not confirmed | Block stage advance; do not set stage to `measuring` |
 | Traffic split planned (concurrent experiments) | Flag that sample size must be calculated on the reduced traffic slice, not full traffic |
 
 ## Reference Files

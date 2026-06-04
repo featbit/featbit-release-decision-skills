@@ -87,7 +87,7 @@ evidence-analysis            ← reads analysisResult, frames CONTINUE / PAUSE /
 learning-capture             ← records what was learned
 ```
 
-The agent triggers analysis via `scripts/analyze.ts` inside `experiment-workspace`. After `analysisResult` is written to the run record, the agent hands off to `evidence-analysis` so the decision can be tied back to the original hypothesis.
+The agent triggers analysis via `featbit_release_decision_analyze_run`. After `analysisResult` is written to the run record, the agent hands off to `evidence-analysis` so the decision can be tied back to the original hypothesis.
 
 ---
 
@@ -95,9 +95,7 @@ The agent triggers analysis via `scripts/analyze.ts` inside `experiment-workspac
 
 The `/analyze` endpoint is idempotent — re-hit it with `"forceFresh": true` whenever you want fresh numbers:
 
-```bash
-npx tsx skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-```
+Call `featbit_release_decision_analyze_run` with `envId`, `experimentId`, `runId`, and `forceFresh: true`.
 
 `inputData` and `analysisResult` on the run record are both refreshed.
 

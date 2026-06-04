@@ -19,9 +19,7 @@ Input data: `n` users exposed, `k` who converted.
 
 Trigger analysis through the web app:
 
-```bash
-npx tsx skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-```
+Call `featbit_release_decision_analyze_run` with `envId`, `experimentId`, `runId`, and `forceFresh: true`.
 
 The `analysisResult` returned (and stored on the run record) includes: `n`, `conv`, `rate`, `rel Δ`, `95% credible CI`, `P(win)`, `risk[ctrl]`, `risk[trt]`.
 

@@ -10,11 +10,11 @@ metadata:
 
 # Experiment Workspace
 
-This skill manages the full experiment lifecycle through the database.
+This skill manages the full experiment lifecycle through FeatBit API-backed database records exposed by the configured FeatBit experimentation MCP server.
 
-It replaces what an online experiment dashboard does — experiment creation, data collection tracking, analysis computation, and result storage — with database records accessible via HTTP API. All data flows through a single PostgreSQL database shared by the web UI, sandbox agent, and analysis scripts.
+It replaces what an online experiment dashboard does — experiment creation, data collection tracking, analysis computation, and result storage — with database records accessible through MCP tools. All data flows through the FeatBit API and its PostgreSQL database shared by the web UI and agents.
 
-The database is the experiment. The script is the dashboard.
+The database is the experiment. The MCP server is the agent's dashboard.
 
 ---
 
@@ -34,7 +34,7 @@ Do not activate if:
 
 ## On Entry — Read Current State
 
-Before doing any work, read the project from the database using the `project-sync` skill's `get-experiment` command.
+Before doing any work, call `featbit_release_decision_get_experiment` through the configured FeatBit experimentation MCP server.
 
 Check these fields:
 
@@ -55,7 +55,7 @@ Check these fields:
 
 ### Database Records (Experiment model)
 
-Each experiment is stored as a row in the `Experiment` table (Prisma schema). Key fields:
+Each run is stored in FeatBit release-decision experiment tables. Key fields:
 
 | DB Field | Purpose |
 |---|---|
@@ -77,24 +77,19 @@ Each experiment is stored as a row in the `Experiment` table (Prisma schema). Ke
 | `status` | `draft` / `collecting` / `analyzing` / `decided` / `archived` — **NEVER use `"completed"`, `"finished"`, `"closed"`, or any other value not in this list.** `"completed"` is a `Project.sandboxStatus` value and does NOT apply to experiments. |
 | `decision` / `decisionSummary` / `decisionReason` | Final decision (summary = plain-language action, reason = technical rationale) |
 
-### Scripts
+### Analysis Tool
 
-```
-skills/experiment-workspace/scripts/
-  analyze.ts             ← agent's entry point: triggers the web /analyze endpoint
-```
-
-The real statistical work lives on the server: the web app's `POST /api/experiments/:id/analyze` endpoint queries `track-service` for the latest metrics and runs the Bayesian or Bandit algorithm (selected automatically from the run's `method` field), then writes both `inputData` and `analysisResult` back to the run record in one round-trip. `analyze.ts` is a thin wrapper that the agent calls so SKILL.md and references never need raw curl.
+The real statistical work lives on the FeatBit API. Call `featbit_release_decision_analyze_run`; it queries the latest available stats, runs the Bayesian or Bandit algorithm selected by the run's `method`, and writes both `inputData` and `analysisResult` back to the run record.
 
 **Two experiment methods** (set via `method` field, configurable in web UI):
 - **bayesian_ab (default)**: Balanced sampling — the data server caps each variant at MIN(count) so both arms have equal N, eliminating SRM noise. One-shot analysis.
 - **bandit**: Pass-through — asymmetric allocation is intentional (Thompson Sampling shifts traffic toward the winning arm). No balanced sampling applied.
 
-The web `/analyze` route picks the algorithm automatically from the run's `method` field.
+The API picks the algorithm automatically from the run's `method` field.
 
 **Key principle: Flag traffic ≠ Experiment traffic.** Developers instrument once (`variation()` + `track()`), never per-experiment. The PM configures experiment scope (traffic%, offset, audience, method) post-hoc via the web UI. The data server applies these filters at query time — the flag itself is unaware of the experiment.
 
-All experiment data lives in the shared PostgreSQL database, accessible via the web app's HTTP API (`SYNC_API_URL`, default `https://www.featbit.ai`). No local experiment files needed — the web UI, sandbox agent, and scripts all read/write the same database.
+All experiment data lives in the shared PostgreSQL database behind FeatBit API. No local experiment files or sync scripts are needed.
 
 ---
 
@@ -102,8 +97,8 @@ All experiment data lives in the shared PostgreSQL database, accessible via the 
 
 ### "First time setup"
 
-1. The web app must be running — it exposes both the state API (`/api/experiments/*`) and the analysis endpoint (`/api/experiments/:id/analyze`).
-2. `track-service` must be running and receiving `flag_evaluation` + metric events from your instrumentation. Analysis reads straight from ClickHouse via track-service — no local `inputData` population step is needed.
+1. The FeatBit API and MCP endpoint must be reachable from the coding agent.
+2. FeatBit stats services must be receiving `flag_evaluation` + metric events from your instrumentation. Analysis reads from FeatBit stats — no local `inputData` population step is needed.
 3. No Python or numpy/scipy install required on the agent side — analysis runs server-side inside the web app.
 
 ### Expert-mode experiments (pre-pasted data, no flag wired)
@@ -120,7 +115,7 @@ When `entryMode === "expert"` and a run already has `inputData` populated via th
 
 1. Confirm the hypothesis slug — derive from the flag key, e.g. `chat-cta-v2`
 2. Ensure the web app is running (scripts need the HTTP API)
-3. Persist the experiment to the database using the `project-sync` skill's `create-run` then `start-run` commands (see Persist State section below)
+3. Persist the experiment run using `featbit_release_decision_create_run` and then `featbit_release_decision_update_run` with `status: "collecting"` (see Persist State section below)
 4. Copy `hypothesis:` verbatim from the project state read on entry
 5. Confirm the `observation_window.start` date — this is today if the flag was just enabled
 6. Set `minimum_sample_per_variant` using the following fallback chain. Do not expose the formula to the user at any step.
@@ -168,22 +163,15 @@ The agent does not need to touch any online dashboard. Persisting the experiment
 
 ### "I want to check if we have enough data"
 
-1. Trigger a fresh analysis — this makes the web app query track-service for the latest metrics:
-   ```bash
-   npx tsx $HOME/.claude/skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-   ```
+1. Trigger a fresh analysis by calling `featbit_release_decision_analyze_run` with `forceFresh: true`.
    The response contains either the analysis result, `{ "status": "no_data" }` (nothing in ClickHouse yet), or `{ "status": "no_data", "reason": "zero_users" }` (metric event present but no users).
 2. If `no_data`: instrumentation hasn't fired yet. Confirm with the user that `flag_evaluation` and the primary metric event are being sent with the correct `env_id` and `flag_key`.
 3. If data is returned, check the total `n` across variants against the run's `minimumSample`. Below minimum → wait and re-check later. Above minimum → proceed to interpret the analysis.
 
 ### "I want to run the analysis"
 
-1. Trigger the web app's analyze endpoint — it queries track-service for fresh metrics, runs the Bayesian algorithm, and writes both `inputData` and `analysisResult` back to the run record:
-   ```bash
-   npx tsx $HOME/.claude/skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-   ```
-   Alternatively, opening the experiment's **Full Analysis** tab in the web UI auto-triggers the same call.
-2. Read the result back via `project-sync get-experiment <experiment-id>` and inspect the matching run's `analysisResult`.
+1. Call `featbit_release_decision_analyze_run` with the run id. It writes both `inputData` and `analysisResult` back to the run record.
+2. Read the result back via `featbit_release_decision_get_experiment` and inspect the matching run's `analysisResult`.
 3. Key outputs to check before handing off:
    - **P(win)** ≥ 95% → strong signal; ≤ 5% → likely harmful; 20–80% → inconclusive
    - **risk[trt]** — if P(win) is near a boundary, this tells you how costly a wrong call is
@@ -205,11 +193,8 @@ See `references/analysis-bayesian.md` → "On Family-wise Error" for details.
 
 ### "I want to update the data and re-run"
 
-1. Re-run analysis (or click **Refresh Latest Analysis** in the UI). The web app re-queries track-service and re-runs the algorithm; both `inputData` and `analysisResult` are overwritten idempotently:
-   ```bash
-   npx tsx $HOME/.claude/skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-   ```
-2. Read the refreshed result via `get-experiment` and continue interpretation.
+1. Re-run analysis with `featbit_release_decision_analyze_run` and `forceFresh: true`. The API re-queries stats and re-runs the algorithm; both `inputData` and `analysisResult` are overwritten idempotently.
+2. Read the refreshed result via `featbit_release_decision_get_experiment` and continue interpretation.
 3. Persist updated experiment status to the database (see Persist State section below).
 
 ### "I want to run a Bandit experiment"
@@ -222,11 +207,8 @@ A bandit experiment replaces fixed 50/50 traffic with dynamic reweighting. It re
 3. Note: bandit works best for proportion metrics (conversion rate, CTR)
 
 **Each reweighting cycle** (recommended every 6–24 hours):
-1. Trigger a fresh analysis via the web app (it picks bandit automatically from the run's `method` field):
-   ```bash
-   npx tsx $HOME/.claude/skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-   ```
-2. Read `analysisResult` from the run record via `get-experiment`:
+1. Trigger a fresh analysis via `featbit_release_decision_analyze_run`; the API picks bandit automatically from the run's `method` field.
+2. Read `analysisResult` from the run record via `featbit_release_decision_get_experiment`:
    - If `enough_units: false` → burn-in not complete, do not apply weights yet (need ≥ 100 users per arm)
    - If `srm_p_value < 0.01` → SRM detected, investigate traffic split before applying weights
    - Otherwise → apply `bandit_weights` to the FeatBit feature flag via API
@@ -236,10 +218,7 @@ A bandit experiment replaces fixed 50/50 traffic with dynamic reweighting. It re
 
 **After stopping — transition to final analysis**:
 1. Set winning arm to 100% in FeatBit
-2. Switch the run's `method` field to `bayesian_ab` (via the web UI experiment settings) and trigger a final analysis:
-   ```bash
-   npx tsx $HOME/.claude/skills/experiment-workspace/scripts/analyze.ts <experiment-id> <run-id>
-   ```
+2. Switch the run's `method` field to `bayesian_ab` using `featbit_release_decision_update_run` or the web UI, then trigger a final `featbit_release_decision_analyze_run`.
 3. Hand off to `evidence-analysis` with the experiment record containing:
    - `analysisResult` (final Bayesian result — note: δ estimate may have wider uncertainty due to unequal traffic)
    - Previous bandit `analysisResult` (final `best_arm_probabilities` — most reliable decision signal)
@@ -257,11 +236,8 @@ A/B and Bandit experiments measure short-term behavior. Transient effects — no
    - `check_at_days: [30, 60, 90]`
    - `launched_at: <launch date>`
 3. At each checkpoint (day 30, 60, 90):
-   - Create a new run with a time-stamped slug (e.g. `<slug>-holdout-30d`) via `project-sync create-run`
-   - Trigger analysis on that run — the web app pulls fresh data from track-service and writes both `inputData` and `analysisResult`:
-     ```bash
-     npx tsx $HOME/.claude/skills/experiment-workspace/scripts/analyze.ts <experiment-id> <holdout-run-id>
-     ```
+   - Create a new run with a time-stamped slug (e.g. `<slug>-holdout-30d`) via `featbit_release_decision_create_run` and `featbit_release_decision_update_run`
+   - Trigger analysis on that run with `featbit_release_decision_analyze_run`
 4. Compare P(win) and rel Δ across checkpoints — look for stability, decay, or growth
 5. When holdout analysis is complete, remove the holdout split from the feature flag
 
@@ -279,16 +255,16 @@ For full interpretation guidance (three patterns: holds / decays / improves), se
 
 - The experiment record in the database is the contract. Do not change `primaryMetricEvent`, `controlVariant`, or `treatmentVariant` after data collection starts — it would invalidate the data already collected.
 - `observationStart` must match when the flag was actually enabled. Do not backfill earlier — pre-flag data is not part of the experiment.
-- After the web `/analyze` endpoint runs, verify the `inputData` it wrote is sane: `k` ≤ `n` for every row, variant keys match the experiment record, no zero `n` values.
-- Do not interpret results by eyeballing `inputData`. Always let the web `/analyze` endpoint compute `analysisResult` and read from there.
-- **NEVER compute analysis statistics inline and write the result directly to `analysisResult`.** The web UI renderer expects the exact JSON schema produced by the `/analyze` endpoint's server-side algorithms. If data is provided manually (e.g. the user tells you "300 users, 13 conversions"), don't inline it — that data is not in track-service, so `/analyze` can't use it and inline synthesis will produce JSON the UI cannot render. Instead, confirm with the user how to backfill the events into track-service, then run `/analyze`.
+- After `featbit_release_decision_analyze_run` runs, verify the `inputData` it wrote is sane: `k` <= `n` for every row, variant keys match the experiment record, no zero `n` values.
+- Do not interpret results by eyeballing `inputData`. Always let the FeatBit API analysis tool compute `analysisResult` and read from there.
+- **NEVER compute analysis statistics inline and write the result directly to `analysisResult`.** The web UI renderer expects the exact JSON schema produced by the server-side algorithms. If data is provided manually (e.g. the user tells you "300 users, 13 conversions"), don't inline it. Confirm with the user how to backfill the events or use the web setup flow, then run `featbit_release_decision_analyze_run`.
 - If the SRM check flags an imbalance (χ² p < 0.01), do not proceed to `evidence-analysis` — the data is unreliable.
 - "97% confidence in the result" does not mean "ship it." That is `evidence-analysis`'s job.
 - **Valid `status` values are: `draft`, `collecting`, `analyzing`, `decided`, `archived` — nothing else.** Do not use `"completed"`, `"finished"`, `"closed"`, or any invented terminal state. `"completed"` belongs to `Project.sandboxStatus`, not `Experiment.status`. Writing an invalid status will break the `ExperimentWorker` polling query.
 
 ### Persist State
 
-After completing work, use the `project-sync` skill to persist state to the database. The specific commands depend on the action performed:
+After completing work, use FeatBit experimentation MCP tools to persist state to the database. The specific calls depend on the action performed:
 
 **Starting an experiment:**
 
@@ -296,23 +272,40 @@ Extraction rule: `primaryMetricEvent` = left token of `primaryMetric` split on `
 Example: `"purchase_completed — north star metric …"` → `primaryMetricEvent = "purchase_completed"`.
 
 ```python
-assert Skill("project-sync", f'create-run {experiment_id} {slug} --hypothesis "{hypothesis}" --method bayesian_ab --primaryMetricEvent "{primary_metric_event}" --primaryMetricType binary --primaryMetricAgg once --controlVariant "{control}" --treatmentVariant "{treatment}" --guardrailEvents "{guardrail_csv}" --minimumSample {n} --trafficPercent 100 --priorProper false --priorMean 0.1 --priorStddev 0.05 --observationStart {today}').ok
-assert Skill("project-sync", f"start-run {experiment_id} {slug}").ok
-assert Skill("project-sync", f'update-state {experiment_id} --lastAction "Created experiment {slug}"').ok
-assert Skill("project-sync", f"set-stage {experiment_id} measuring").ok
-assert Skill("project-sync", f'add-activity {experiment_id} --type stage_update --title "Experiment {slug} created"').ok
+state = MCP("featbit_release_decision_create_run", envId=env_id, experimentId=experiment_id)
+run_id = newest_run_id(state)
+MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=run_id, update={
+    "slug": slug,
+    "status": "collecting",
+    "hypothesis": hypothesis,
+    "method": "bayesian_ab",
+    "primaryMetricEvent": primary_metric_event,
+    "primaryMetricType": "binary",
+    "primaryMetricAgg": "once",
+    "controlVariant": control,
+    "treatmentVariant": treatment,
+    "guardrailEvents": guardrail_csv,
+    "minimumSample": n,
+    "trafficPercent": 100,
+    "priorProper": False,
+    "priorMean": 0.1,
+    "priorStddev": 0.05,
+    "observationStart": today,
+})
+MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={"lastAction": f"Created experiment {slug}"})
+MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="measuring")
 ```
 
 **Running / re-running analysis:**  
-`analyze.ts` calls the web `/analyze` endpoint which writes `inputData` and `analysisResult` automatically. Then:
+`featbit_release_decision_analyze_run` writes `inputData` and `analysisResult` automatically. Then:
 ```python
-assert Skill("project-sync", f"analyze-run {experiment_id} {slug}").ok
+MCP("featbit_release_decision_analyze_run", envId=env_id, experimentId=experiment_id, runId=run_id, forceFresh=True)
 ```
 
 **Closing an experiment:**
 ```python
-assert Skill("project-sync", f"decide-run {experiment_id} {slug}").ok
-assert Skill("project-sync", f'update-state {experiment_id} --lastAction "Experiment {slug} closed"').ok
+MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=run_id, update={"status": "decided"})
+MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={"lastAction": f"Experiment {slug} closed"})
 ```
 
 ---
@@ -333,19 +326,19 @@ When handing off to `evidence-analysis`, pass the experiment's `analysisResult` 
 ## Execution Procedure
 
 ```python
-def manage_experiment(project_id, user_message):
-    state = Skill("project-sync", f"get-experiment {project_id}")
+def manage_experiment(env_id, experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
     if state.hypothesis in ("", None):
-        Skill("hypothesis-design", project_id); return
+        Skill("hypothesis-design", experiment_id); return
     if state.primaryMetric in ("", None):
-        Skill("measurement-design", project_id); return
+        Skill("measurement-design", experiment_id); return
     intent = classify_intent(user_message)
-    # "create" → create-run + start-run path (see Persist State / Starting an experiment)
-    # "reanalyze" → analyze.ts + analyze-run path
-    # "bandit" → analyze.ts + bandit reweighting cycle
+    # "create" -> create run + set status collecting path (see Persist State / Starting an experiment)
+    # "reanalyze" -> featbit_release_decision_analyze_run path
+    # "bandit" -> featbit_release_decision_analyze_run + bandit reweighting cycle
     # "holdout" → create holdout run with time-stamped slug
-    # "close" → decide-run + hand off to learning-capture
-    execute_intent(intent, project_id, state)
+    # "close" -> set status decided + hand off to learning-capture
+    execute_intent(intent, env_id, experiment_id, state)
 ```
 
 ## Signal Inference
@@ -372,4 +365,4 @@ def manage_experiment(project_id, user_message):
 
 **Agent-facing script:**
 
-- [scripts/analyze.ts](scripts/analyze.ts) — trigger the web app's `/api/experiments/:id/analyze` endpoint for a run
+- FeatBit experimentation MCP `featbit_release_decision_analyze_run` — trigger server-side analysis for a run
