@@ -85,10 +85,10 @@ If any check fails, the right move is NOT to decide — it is to wait, fix, or e
 
 Once evidence is sufficient, read the experiment's `analysisResult` and frame the outcome using exactly one of these categories:
 
-- **CONTINUE** — Primary metric P(win) ≥ 95% and risk[trt] is low. Guardrail P(win) all > 20%. Proceed with planned expansion.
-- **PAUSE** — Primary metric P(win) 80–95%, or a guardrail P(win) ≤ 20%, or SRM check failed. Signal exists but is not clean enough to expand. Investigate before proceeding.
-- **ROLLBACK CANDIDATE** — A guardrail P(win) ≤ 5%, or primary metric P(win) ≤ 5%. Evidence of harm. Flag should be reverted.
-- **INCONCLUSIVE** — Sample below validity floor, or risk[trt] and risk[ctrl] both still high, or primary metric P(win) 20–80% after a full observation window. Extend window or revisit instrumentation.
+- **CONTINUE** - Primary metric P(win) >= 95% and risk[trt] is low. Guardrails are acceptable. This means the product team can move the feature flag toward the treatment variant: either set treatment to 100% if rollout constraints are cleared, or expand in monitored steps such as 50% -> 80% -> 100%.
+- **PAUSE** - Primary metric P(win) is 80-95%, or a guardrail shows possible harm, or SRM/instrumentation failed. This means do not increase exposure yet; hold the current rollout while investigating the named risk.
+- **ROLLBACK CANDIDATE** - A guardrail crosses a strong harm threshold, or primary metric P(win) <= 5%. This means route users back to control/default or disable the candidate flag path before investigating.
+- **INCONCLUSIVE** - Sample is below validity floor, risk has not converged, or primary metric remains uncertain after the window. This means do not change rollout based on this run; extend the window, collect more sample, or fix measurement.
 
 See [references/decision-framing-guide.md](references/decision-framing-guide.md) for how to write each category's decision statement and what counts as "low" for risk values.
 
@@ -96,9 +96,16 @@ See [references/decision-framing-guide.md](references/decision-framing-guide.md)
 
 Write a structured decision statement with:
 - The recommendation category
+- A `decisionSummary` that starts with the plain-language feature-flag action, not the statistical method. Use this shape: "[Action]. Why: [one sentence with the strongest metric and guardrail evidence]."
 - The evidence that supports it (numbers, not vague descriptions)
 - The link back to the original hypothesis
-- The explicit next action
+- The explicit next feature-flag action the product team should take
+
+DecisionSummary action wording:
+- CONTINUE: "Move the feature flag toward treatment. If no rollout constraints remain, set treatment to 100%; otherwise expand gradually, for example 50% -> 80% -> 100%, while watching guardrails."
+- PAUSE: "Hold the current rollout. Do not increase treatment exposure until [specific risk] is checked."
+- ROLLBACK CANDIDATE: "Rollback the candidate. Route users back to control/default or disable the candidate path, then investigate [specific harm]."
+- INCONCLUSIVE: "Keep observing before changing rollout. Extend the window, collect enough sample, or fix [specific measurement issue]."
 
 ## Operating Rules
 

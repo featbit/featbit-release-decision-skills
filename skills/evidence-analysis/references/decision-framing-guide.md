@@ -19,7 +19,7 @@ These are **action categories**, not statistical verdicts. They exist to produce
 
 ### CONTINUE
 
-**Meaning:** The evidence supports proceeding with the planned rollout expansion.
+**Meaning:** The evidence supports moving the feature flag toward the treatment/candidate variant. In ordinary product language: ship the winning version, either by setting treatment to 100% or by expanding in monitored steps if rollout constraints remain.
 
 **Conditions (read from experiment's `analysisResult`):**
 - Primary metric P(win) ≥ 95%
@@ -29,13 +29,13 @@ These are **action categories**, not statistical verdicts. They exist to produce
 - SRM check passed
 
 **What to say:**
-> "The primary metric [metric name] shows P(win) = [X]% with risk[trt] = [value] for the candidate variant. Guardrails are healthy (all P(win) > 20%). Recommend proceeding to Phase 2 at [next %]."
+> "Move the feature flag toward treatment. The candidate improved [metric name] from [control rate] to [treatment rate], with P(win) = [X]% and risk[trt] = [value]. Guardrails are healthy. If no rollout constraints remain, set treatment to 100%; otherwise expand gradually, for example 50% -> 80% -> 100%, while watching guardrails."
 
 ---
 
 ### PAUSE
 
-**Meaning:** Something needs investigation before the rollout expands. Not necessarily harmful — signal is mixed or incomplete.
+**Meaning:** Something needs investigation before the rollout expands. Not necessarily harmful — signal is mixed or incomplete. In ordinary product language: keep the current flag split and do not send more users to treatment yet.
 
 **Conditions (read from experiment's `analysisResult`):**
 - Primary metric P(win) is 80–95% (leaning positive but not conclusive)
@@ -45,13 +45,13 @@ These are **action categories**, not statistical verdicts. They exist to produce
 - Or an instrumentation anomaly was detected
 
 **What to say:**
-> "The primary metric shows P(win) = [X]%, but [guardrail metric] P(win) = [Y]% — a possible harm signal. Recommend pausing at current exposure while investigating [specific signal]."
+> "Hold the current rollout. Do not increase treatment exposure yet because [specific metric/guardrail/SRM issue] is not clean. Keep the flag at the current split while investigating [specific signal]."
 
 ---
 
 ### ROLLBACK CANDIDATE
 
-**Meaning:** Evidence indicates the candidate variant is causing harm.
+**Meaning:** Evidence indicates the candidate variant is causing harm. In ordinary product language: stop sending users to the candidate and return them to the safe/default experience.
 
 **Conditions (read from experiment's `analysisResult`):**
 - A guardrail P(win) ≤ 5% (strong harm signal on a protected metric)
@@ -59,7 +59,7 @@ These are **action categories**, not statistical verdicts. They exist to produce
 - Or critical errors or regressions are directly attributable to the candidate variant
 
 **What to say:**
-> "Evidence indicates the candidate variant is degrading [guardrail metric]: P(win) = [X]%, risk[ctrl] = [value]. Recommend disabling the candidate variant immediately and investigating [root cause area]."
+> "Rollback the candidate. Route users back to control/default, or disable the candidate flag path, because [primary metric or guardrail] shows harm: [concrete number]. Investigate [root cause area] before exposing treatment again."
 
 Do NOT soften ROLLBACK CANDIDATE language. Clarity is operational here.
 
@@ -67,7 +67,7 @@ Do NOT soften ROLLBACK CANDIDATE language. Clarity is operational here.
 
 ### INCONCLUSIVE
 
-**Meaning:** The collected evidence is genuinely insufficient to support a directional decision.
+**Meaning:** The collected evidence is genuinely insufficient to support a directional decision. In ordinary product language: do not change rollout based on this run yet.
 
 **Conditions (read from experiment's `analysisResult`):**
 - Sample per variant is below `minimumSample` in the experiment record
@@ -76,7 +76,7 @@ Do NOT soften ROLLBACK CANDIDATE language. Clarity is operational here.
 - Or external contamination (holiday, marketing event, outage) compromised the window
 
 **What to say:**
-> "Current evidence is insufficient for a directional decision. [N] exposures per variant collected over [X days]. Primary metric P(win) = [X]% with risk[trt] = [value] — posterior has not converged. Recommend extending the observation window to cover at least one full business cycle (≥ 7 days) before deciding."
+> "Keep observing before changing rollout. Current evidence is insufficient: [N] exposures per variant over [X days], P(win) = [X]%, and [sample/risk/SRM/instrumentation issue]. Extend the window, collect enough sample, or fix measurement before deciding."
 
 ---
 
@@ -126,5 +126,6 @@ Decision: [CONTINUE / PAUSE / ROLLBACK CANDIDATE / INCONCLUSIVE]
 
 Reasoning: [2–3 sentences tying the evidence to the hypothesis and the decision category]
 
-Next action: [specific step — expand to X%, disable flag, extend window, investigate Y]
+Plain-language action: [what to do to the feature flag now: move treatment to 100%, expand 50% -> 80% -> 100%, hold current split, rollback to control/default, or keep observing]
+Next action: [specific owner/action: update rollout, investigate guardrail, fix instrumentation, extend window]
 ```
