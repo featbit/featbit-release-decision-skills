@@ -57,8 +57,8 @@ Then capture it as a structured object — NOT a paragraph. The five fields are:
 
 | Field | Purpose | Example |
 |---|---|---|
-| `name` | Short human-readable label (shows in the web UI's metric table) | `"Signup conversion"` |
-| `event` | Instrumented event key emitted from code (snake_case, no spaces) | `"signup_completed"` |
+| `name` | Short human-readable label, 80 characters or fewer (shows in the web UI's metric table) | `"Signup conversion"` |
+| `event` | Instrumented event key emitted from code, 128 characters or fewer, no spaces | `"signup_completed"` |
 | `metricType` | `binary` for conversion (fires 0/1) or `continuous` for a value (revenue, latency, count per user) | `"binary"` |
 | `metricAgg` | `once` (max 1 per user, for funnel conversion), `count` (tally all occurrences), `sum` (add numeric payloads), or `average` (mean of values per user) | `"once"` |
 | `description` | One-sentence rationale — why this metric decides go/no-go | `"Proportion of visitors that sign up — directly measures the H1 change."` |
@@ -103,28 +103,34 @@ Check: can the current codebase emit this event? If not, instrumentation must be
 
 ### Persist State
 
-Use FeatBit experimentation MCP tools to sync state, and confirm instrumentation before writing:
+Use FeatBit experimentation MCP tools to sync state, and confirm instrumentation before writing. Primary metrics must be written through `featbit_release_decision_update_metrics`, not `featbit_release_decision_update_experiment`.
 
 ```python
-MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
-    "primaryMetric": primary_json,
+MCP("featbit_release_decision_update_metrics", experimentId=experiment_id, update={
+    "metricName": primary_metric_name,
+    "metricEvent": primary_metric_event,
+    "metricType": primary_metric_type,
+    "metricAgg": primary_metric_agg,
+    "metricDescription": primary_metric_description,
     "guardrails": guardrails_json,
+})
+MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
     "lastAction": "Metrics defined",
 })
-MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="measuring")
+MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="measuring")
 ```
 
-**`primaryMetric` must be a JSON object** with `{name, event, metricType, metricAgg, description?}`. The web UI renders each field as its own column (NAME / EVENT / TYPE / AGG) — do NOT jam a paragraph into `name`. Rationale goes in `description`.
+`metricName`, `metricEvent`, `metricType`, and `metricAgg` are all required. The web UI renders each field as its own column (NAME / EVENT / TYPE / AGG) — do NOT jam a paragraph into `metricName`. Keep `metricName` 80 characters or fewer, and keep `metricEvent` as a key with no spaces. Rationale goes in `metricDescription`.
 
 **`guardrails` must be a JSON array** of objects with the primary-metric shape plus `direction` (`increase_bad` or `decrease_bad`). One entry per guardrail, never a single string or newline-separated text.
 
-The FeatBit API validates both fields' JSON shape and enums; if validation fails, correct the payload and retry once.
+The FeatBit API validates the primary metric event/type/aggregation and guardrail JSON shape/enums; if validation fails, correct the payload and retry once.
 
 ## Execution Procedure
 
 ```python
-def design_measurement(env_id, experiment_id, user_message):
-    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
+def design_measurement(experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)
     if state.hypothesis in ("", None):
         Skill("hypothesis-design", experiment_id)
         return
@@ -140,13 +146,6 @@ def design_measurement(env_id, experiment_id, user_message):
     if not instrumentation_confirmed:
         say("Instrumentation must be confirmed before exposure begins.")
         return  # do not advance stage until confirmed
-    primary_json = json.dumps({
-        "name": primary_metric.name,
-        "event": primary_metric.event,
-        "metricType": primary_metric.metric_type,       # binary | continuous
-        "metricAgg":  primary_metric.metric_agg,        # once | count | sum | average
-        "description": primary_metric.rationale,
-    })
     guardrails_json = json.dumps([
         {
             "name":        g.name,
@@ -158,12 +157,18 @@ def design_measurement(env_id, experiment_id, user_message):
         }
         for g in guardrails
     ])
-    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
-        "primaryMetric": primary_json,
+    MCP("featbit_release_decision_update_metrics", experimentId=experiment_id, update={
+        "metricName": primary_metric.name,
+        "metricEvent": primary_metric.event,
+        "metricType": primary_metric.metric_type,       # binary | continuous
+        "metricAgg":  primary_metric.metric_agg,        # once | count | sum | average
+        "metricDescription": primary_metric.rationale,
         "guardrails": guardrails_json,
+    })
+    MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
         "lastAction": "Metrics defined",
     })
-    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="measuring")
+    MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="measuring")
     Skill("reversible-exposure-control", experiment_id)
 ```
 

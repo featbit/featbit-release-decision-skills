@@ -26,7 +26,8 @@ Its job is to convert a goal into a testable, falsifiable statement before any i
 Call `featbit_release_decision_get_experiment` through the configured FeatBit experimentation MCP server to load the current experiment state. Check:
 
 - `goal` and `intent` — were they set by `intent-shaping`? If empty, go back to `intent-shaping` first.
-- `hypothesis`, `change`, `variants`, `primaryMetric` — are they already filled? If so, verify with the user whether to refine or start fresh.
+- `hypothesis`, `change`, `variants` — are they already filled? If so, verify with the user whether to refine or start fresh.
+- `primaryMetric` — if already present, verify whether it is a complete metric contract from `measurement-design`; do not create or overwrite it here.
 - `stage` — confirms where the project is in the loop.
 
 This read is required. Do not rely on conversation memory alone — the database is the canonical source.
@@ -57,14 +58,17 @@ Work with the user to fill all five components. Ask about missing parts one at a
 
 Ask: "Under what conditions would we conclude this hypothesis was wrong?" If the answer is "none", it is not falsifiable.
 
-### Sharpen the metric claim
+### Sharpen the metric direction
 
 The hypothesis does not need a specific number at this stage. It needs a direction. Quantitative targets belong in the evaluation plan, not the hypothesis.
+
+Do not persist a primary metric from this skill. A usable FeatBit primary metric requires `metricName`, `metricEvent`, `metricType`, and `metricAgg`, and must be written later through `featbit_release_decision_update_metrics` during measurement design.
 
 ## Operating Rules
 
 - Do not proceed to implementation planning until all five components are present
 - Do not conflate the hypothesis with the success threshold (that belongs in `evidence-analysis`)
+- Do not call `featbit_release_decision_update_experiment` with `primaryMetric`
 - Hand off to `reversible-exposure-control` once hypothesis is confirmed
 
 ### Persist State
@@ -72,21 +76,20 @@ The hypothesis does not need a specific number at this stage. It needs a directi
 Use FeatBit experimentation MCP tools to sync state. Both writes are required:
 
 ```python
-MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
     "hypothesis": "We believe [change] will [move metric] for [audience] because [reason]",
     "change": "[specific change]",
     "variants": "[control (annotation)|treatment (annotation)]",
-    "primaryMetric": "[metric name] - [rationale]",
     "lastAction": "Hypothesis formed",
 })
-MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="hypothesis")
+MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="hypothesis")
 ```
 
 ## Execution Procedure
 
 ```python
-def design_hypothesis(env_id, experiment_id, user_message):
-    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
+def design_hypothesis(experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)
     if state.goal in ("", None):
         Skill("intent-shaping", experiment_id)
         return
@@ -95,14 +98,13 @@ def design_hypothesis(env_id, experiment_id, user_message):
     # ask about missing parts one at a time
     # falsifiability check: "under what conditions would we conclude this was wrong?"
     hypothesis = build_hypothesis(state.goal, template, user_message)
-    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
         "hypothesis": hypothesis.text,
         "change": hypothesis.change,
         "variants": f"{hypothesis.control} (control)|{hypothesis.treatment} (treatment)",
-        "primaryMetric": f"{hypothesis.metric} - {hypothesis.metric_rationale}",
         "lastAction": "Hypothesis formed",
     })
-    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="hypothesis")
+    MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="hypothesis")
     Skill("reversible-exposure-control", experiment_id)
 ```
 
@@ -115,7 +117,7 @@ def design_hypothesis(env_id, experiment_id, user_message):
 | Component missing: change | Ask "What specifically will be built or changed?" |
 | Component missing: causal reason | Ask "Why do you expect that change to move the metric?" |
 | Falsifiability fails | Ask "Under what conditions would you conclude the hypothesis was wrong?" |
-| Metric implied but unnamed | Name it explicitly — do not allow "some engagement metric" to pass |
+| Metric implied but unnamed | Name the metric direction inside the hypothesis; do not create `primaryMetric` here |
 
 ## Reference Files
 

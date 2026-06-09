@@ -95,7 +95,7 @@ The agent triggers analysis via `featbit_release_decision_analyze_run`. After `a
 
 The `/analyze` endpoint is idempotent — re-hit it with `"forceFresh": true` whenever you want fresh numbers:
 
-Call `featbit_release_decision_analyze_run` with `envId`, `experimentId`, `runId`, and `forceFresh: true`.
+Call `featbit_release_decision_analyze_run` with `experimentId`, `runId`, and `forceFresh: true`.
 
 `inputData` and `analysisResult` on the run record are both refreshed.
 

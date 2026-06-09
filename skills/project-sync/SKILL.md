@@ -32,7 +32,7 @@ Use the configured FeatBit experimentation MCP server for all release-decision s
 - `Organization: <organization-id>`
 - `Workspace: <workspace-id>`
 
-Every tool call that touches experiment data must pass `envId` and `experimentId`. The server checks environment access on each call.
+Every tool call that touches experiment data must pass `experimentId`. The server resolves the FeatBit environment from the experiment and checks environment access on each call.
 
 Available tools:
 
@@ -41,7 +41,7 @@ Available tools:
 | `featbit_release_decision_get_experiment` | `get-experiment` |
 | `featbit_release_decision_update_experiment` | `update-state` |
 | `featbit_release_decision_set_stage` | `set-stage` |
-| `featbit_release_decision_update_metrics` | metric fields in `update-state` |
+| `featbit_release_decision_update_metrics` | complete primary metric and guardrail contract |
 | `featbit_release_decision_create_run` | `create-run` |
 | `featbit_release_decision_update_run` | `start-run`, `analyze-run`, `decide-run`, `archive-run`, `save-input`, `save-result`, `record-decision`, `save-learning` |
 | `featbit_release_decision_analyze_run` | server-side `analyze-run` |

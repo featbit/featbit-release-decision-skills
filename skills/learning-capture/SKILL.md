@@ -77,12 +77,12 @@ The learning must always end with a directional suggestion for what to test next
 Use FeatBit experimentation MCP tools to sync state:
 
 ```python
-MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
     "lastLearning": summary,
     "lastAction": "Learning captured",
 })
-MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="learning")
-MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=run_id, update={
+MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="learning")
+MCP("featbit_release_decision_update_run", experimentId=experiment_id, runId=run_id, update={
     "status": "archived",
     "whatChanged": what_changed,
     "whatHappened": what_happened,
@@ -95,8 +95,8 @@ MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment
 ## Execution Procedure
 
 ```python
-def capture_learning(env_id, experiment_id, user_message):
-    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
+def capture_learning(experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)
     active_run = pick_active_run(state)   # run in decided status
     if active_run is None or active_run.decision is None:
         Skill("evidence-analysis", experiment_id)
@@ -106,12 +106,12 @@ def capture_learning(env_id, experiment_id, user_message):
     learning = build_learning(active_run, state, template, user_message)
     # INCONCLUSIVE cycles still require whyItHappened + nextHypothesis:
     # "we learned this measurement approach was inadequate" is valid and complete
-    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
         "lastLearning": learning.summary,
         "lastAction": "Learning captured",
     })
-    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="learning")
-    MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=active_run.id, update={
+    MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="learning")
+    MCP("featbit_release_decision_update_run", experimentId=experiment_id, runId=active_run.id, update={
         "status": "archived",
         "whatChanged": learning.what_changed,
         "whatHappened": learning.what_happened,

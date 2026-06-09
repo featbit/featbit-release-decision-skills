@@ -188,7 +188,7 @@ Reaching `minimum_sample_per_variant` only means the results are safe to read. I
 
 After reaching the floor, re-trigger analysis periodically via the web app:
 
-Call `featbit_release_decision_analyze_run` with `envId`, `experimentId`, `runId`, and `forceFresh: true`.
+Call `featbit_release_decision_analyze_run` with `experimentId`, `runId`, and `forceFresh: true`.
 
 Then read `analysisResult` from the run record via `featbit_release_decision_get_experiment` and check `risk[trt]` and `risk[ctrl]`. These are outputs computed server-side by the analyze endpoint — there is no configuration field for them. The judgment of "low enough" is made by you or the agent running `evidence-analysis` by comparing the values to the reference ranges in the Decision Guide below.
 

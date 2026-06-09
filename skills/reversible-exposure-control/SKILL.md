@@ -126,11 +126,11 @@ Use this path only if the current user can change application code. If not, crea
 Use FeatBit experimentation MCP tools to sync state. Both writes are required:
 
 ```python
-MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
     "constraints": flag_contract_and_rollout,
     "lastAction": what_was_done,
 })
-MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="implementing")
+MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="implementing")
 # Note: only two valid stages apply here: "implementing" (flag contract defined, not yet live)
 # Stage stays at "implementing" throughout; there is no "exposing" stage value.
 ```
@@ -138,8 +138,8 @@ MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_
 ## Execution Procedure
 
 ```python
-def control_exposure(env_id, experiment_id, user_message):
-    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
+def control_exposure(experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)
     if state.hypothesis in ("", None):
         Skill("hypothesis-design", experiment_id); return
     role = infer_role(user_message, state)
@@ -156,11 +156,11 @@ def control_exposure(env_id, experiment_id, user_message):
         # CF-04: initial rollout % set? protected audiences defined? expansion criteria defined? rollback triggers defined?
         assert cf03_and_cf04_pass(state, intent), "define flag contract and rollout plan before enabling"
         execute_operator_intent(intent, state)
-    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
         "constraints": constraints,
         "lastAction": action,
     })
-    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="implementing")
+    MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="implementing")
 ```
 
 ## Signal Inference

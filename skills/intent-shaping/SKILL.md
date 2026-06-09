@@ -68,12 +68,12 @@ Confirm the goal belongs to this iteration — not a 6-month vision.
 Use FeatBit experimentation MCP tools to sync state. Both writes are required:
 
 ```python
-MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
     "goal": "...",
     "intent": "...",
     "lastAction": "Intent clarified",
 })
-MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="intent")
+MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="intent")
 ```
 
 **Terminology note:** `goal` and `intent` overlap intentionally. `goal` = the measurable business outcome. `intent` = what the user said they wanted to improve or learn (may still be broad). Both are written at this stage.
@@ -81,8 +81,8 @@ MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_
 ## Execution Procedure
 
 ```python
-def shape_intent(env_id, experiment_id, user_message):
-    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
+def shape_intent(experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)
     if not is_blank_intent(state) and not user_wants_reset(user_message):
         # goal and intent already set — hand off rather than overwrite
         Skill("hypothesis-design", experiment_id)
@@ -94,12 +94,12 @@ def shape_intent(env_id, experiment_id, user_message):
     # scope check → confirm this is an iteration goal, not a 6-month vision
     goal = extract_goal(user_message, patterns)
     intent = user_message  # preserve the original phrasing
-    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
         "goal": goal,
         "intent": intent,
         "lastAction": "Intent clarified",
     })
-    MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="intent")
+    MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="intent")
     Skill("hypothesis-design", experiment_id)
 ```
 

@@ -288,7 +288,7 @@ One parameter is passed as the invocation argument when the slash command is act
 
 - `experiment-id` — the release-decision experiment identifier in FeatBit
 
-The current FeatBit environment id must come from the MCP client/session context, the web page context, or the user's prompt. If it is missing, ask for `envId` before reading or writing experiment data.
+The MCP server resolves the FeatBit environment from `experimentId`. Do not ask the user for `envId` before reading or writing release-decision experiment data.
 
 Invocation pattern:
 ```
@@ -299,7 +299,7 @@ Parse `experiment-id` from the starting prompt. If it is missing, ask the user b
 
 ### State loading
 
-Before asking or saying anything, read the current project state using `featbit_release_decision_get_experiment` with `envId` and `experiment-id`.
+Before asking or saying anything, read the current project state using `featbit_release_decision_get_experiment` with `experimentId`.
 
 If the MCP call fails because the server is unreachable, retry **once**. If the retry still fails, treat this exactly like a blank new project and proceed with the greeting — do not diagnose, do not mention the database.
 
@@ -389,12 +389,10 @@ Identify which control lenses are relevant based on the project state and the us
 ```python
 def on_session_start(argv, user_message):
     experiment_id = parse_experiment_id(argv)
-    env_id = resolve_env_id_from_context_or_user()
     assert experiment_id, "experiment-id is required — ask the user if missing"
-    assert env_id, "envId is required — ask the user if missing"
-    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
+    state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)
     if state.status == "unavailable":
-        state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)  # retry once
+        state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)  # retry once
     if state.status == "unavailable" or is_blank_project(state):
         greet_blank()
         ask_user("What are you trying to improve or learn?")
@@ -420,12 +418,6 @@ def on_user_turn(project_id, state, message):
     lens = infer_cf_lens(state, message)   # see Signal Inference below
     if lens is None:
         return  # answer the question directly; no satellite dispatch
-
-    # Conflict check right before starting an experiment run.
-    if lens == "CF-05/CF-06" and about_to_start_run(message, state):
-        res = MCP("featbit_release_decision_check_conflicts", envId=env_id, experimentId=experiment_id) if MCP.has_tool("featbit_release_decision_check_conflicts") else None
-        if res and res.hasConflicts:
-            warn_conflicts_to_user(res.conflicts)   # concise, one line each
 
     satellite, args = dispatch[lens](project_id, state, message)
     return Skill(satellite, args)

@@ -55,7 +55,7 @@ Every time the web `/analyze` endpoint runs a bandit:
 
 The web app's analyze endpoint picks `bandit` automatically from the run's `method` field — no separate script invocation:
 
-Call `featbit_release_decision_analyze_run` with `envId`, `experimentId`, `runId`, and `forceFresh: true`.
+Call `featbit_release_decision_analyze_run` with `experimentId`, `runId`, and `forceFresh: true`.
 
 Reads:
 - Run record from the database (variant names, metric events, `method: "bandit"`)

@@ -119,10 +119,10 @@ DecisionSummary action wording:
 Use FeatBit experimentation MCP tools to sync state. Stage stays at `measuring` — no stage advance here (the project stage advances to `learning` only when `learning-capture` completes):
 
 ```python
-MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
     "lastAction": f"Decision: {category}",
 })
-MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=run_id, update={
+MCP("featbit_release_decision_update_run", experimentId=experiment_id, runId=run_id, update={
     "status": "decided",
     "decision": category,
     "decisionSummary": summary,
@@ -133,8 +133,8 @@ MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment
 ## Execution Procedure
 
 ```python
-def analyze_evidence(env_id, experiment_id, user_message):
-    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
+def analyze_evidence(experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)
     if state.primaryMetric in ("", None):
         Skill("measurement-design", experiment_id)
         return
@@ -160,10 +160,10 @@ def analyze_evidence(env_id, experiment_id, user_message):
     # INCONCLUSIVE: P(win) 20-80% after full window, or risk both still high
     # lean-control: P(win) < 20% but above ROLLBACK threshold
     summary, reason = build_decision_artifact(category, active_run)
-    MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={
+    MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
         "lastAction": f"Decision: {category}",
     })
-    MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=active_run.id, update={
+    MCP("featbit_release_decision_update_run", experimentId=experiment_id, runId=active_run.id, update={
         "status": "decided",
         "decision": category,
         "decisionSummary": summary,

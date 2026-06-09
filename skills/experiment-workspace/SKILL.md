@@ -272,9 +272,9 @@ Extraction rule: `primaryMetricEvent` = left token of `primaryMetric` split on `
 Example: `"purchase_completed — north star metric …"` → `primaryMetricEvent = "purchase_completed"`.
 
 ```python
-state = MCP("featbit_release_decision_create_run", envId=env_id, experimentId=experiment_id)
+state = MCP("featbit_release_decision_create_run", experimentId=experiment_id)
 run_id = newest_run_id(state)
-MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=run_id, update={
+MCP("featbit_release_decision_update_run", experimentId=experiment_id, runId=run_id, update={
     "slug": slug,
     "status": "collecting",
     "hypothesis": hypothesis,
@@ -292,20 +292,20 @@ MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment
     "priorStddev": 0.05,
     "observationStart": today,
 })
-MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={"lastAction": f"Created experiment {slug}"})
-MCP("featbit_release_decision_set_stage", envId=env_id, experimentId=experiment_id, stage="measuring")
+MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={"lastAction": f"Created experiment {slug}"})
+MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="measuring")
 ```
 
 **Running / re-running analysis:**  
 `featbit_release_decision_analyze_run` writes `inputData` and `analysisResult` automatically. Then:
 ```python
-MCP("featbit_release_decision_analyze_run", envId=env_id, experimentId=experiment_id, runId=run_id, forceFresh=True)
+MCP("featbit_release_decision_analyze_run", experimentId=experiment_id, runId=run_id, forceFresh=True)
 ```
 
 **Closing an experiment:**
 ```python
-MCP("featbit_release_decision_update_run", envId=env_id, experimentId=experiment_id, runId=run_id, update={"status": "decided"})
-MCP("featbit_release_decision_update_experiment", envId=env_id, experimentId=experiment_id, update={"lastAction": f"Experiment {slug} closed"})
+MCP("featbit_release_decision_update_run", experimentId=experiment_id, runId=run_id, update={"status": "decided"})
+MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={"lastAction": f"Experiment {slug} closed"})
 ```
 
 ---
@@ -326,8 +326,8 @@ When handing off to `evidence-analysis`, pass the experiment's `analysisResult` 
 ## Execution Procedure
 
 ```python
-def manage_experiment(env_id, experiment_id, user_message):
-    state = MCP("featbit_release_decision_get_experiment", envId=env_id, experimentId=experiment_id)
+def manage_experiment(experiment_id, user_message):
+    state = MCP("featbit_release_decision_get_experiment", experimentId=experiment_id)
     if state.hypothesis in ("", None):
         Skill("hypothesis-design", experiment_id); return
     if state.primaryMetric in ("", None):
@@ -338,7 +338,7 @@ def manage_experiment(env_id, experiment_id, user_message):
     # "bandit" -> featbit_release_decision_analyze_run + bandit reweighting cycle
     # "holdout" → create holdout run with time-stamped slug
     # "close" -> set status decided + hand off to learning-capture
-    execute_intent(intent, env_id, experiment_id, state)
+    execute_intent(intent, experiment_id, state)
 ```
 
 ## Signal Inference
