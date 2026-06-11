@@ -70,6 +70,7 @@ Do not persist a primary metric from this skill. A usable FeatBit primary metric
 - Do not conflate the hypothesis with the success threshold (that belongs in `evidence-analysis`)
 - Do not call `featbit_release_decision_update_experiment` with `primaryMetric`
 - Hand off to `reversible-exposure-control` once hypothesis is confirmed
+- After CF-02 is persisted, tell the user the UI next step only when they ask "what next" or similar: mark the Intent & Hypothesis step satisfied, move to the Exposure stage, then copy/run the CF-03/04 Agent Prompt.
 
 ### Persist State
 
@@ -105,6 +106,7 @@ def design_hypothesis(experiment_id, user_message):
         "lastAction": "Hypothesis formed",
     })
     MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="hypothesis")
+    say("In the UI, mark Intent & Hypothesis satisfied, move to Exposure, then run the CF-03/04 prompt to define the feature flag and rollout contract.")
     Skill("reversible-exposure-control", experiment_id)
 ```
 

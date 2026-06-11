@@ -62,6 +62,7 @@ Confirm the goal belongs to this iteration — not a 6-month vision.
 - Ask one question at a time
 - Never proceed to hypothesis or implementation until goal is measurable
 - Hand off to `hypothesis-design` once the goal is sharp
+- After CF-01 is persisted, tell the user the UI next step only when they ask "what next" or similar: mark CF-01 satisfied in the current Intent & Hypothesis prompt card, then continue with CF-02 / hypothesis design in the same stage.
 
 ### Persist State
 
@@ -100,6 +101,7 @@ def shape_intent(experiment_id, user_message):
         "lastAction": "Intent clarified",
     })
     MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="intent")
+    say("In the UI, mark CF-01 satisfied, then continue with the CF-02 hypothesis prompt in the same Intent & Hypothesis stage.")
     Skill("hypothesis-design", experiment_id)
 ```
 

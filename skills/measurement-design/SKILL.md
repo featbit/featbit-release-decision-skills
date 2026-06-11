@@ -12,7 +12,7 @@ metadata:
 
 This skill handles **CF-05: Measurement Discipline** from the release-decision framework.
 
-Its job is to ensure every hypothesis has exactly one primary metric, a small set of guardrails, and an event schema that can produce evidence for the decision.
+Its job is to ensure every hypothesis has exactly one primary metric with a clear "better" direction, a small set of guardrails with alarm directions, and an event schema that can produce evidence for the decision.
 
 ## When to Activate
 
@@ -53,7 +53,7 @@ Ask: "If this experiment runs for 2 weeks and you had to make a go/no-go decisio
 
 The answer is the primary metric. One only.
 
-Then capture it as a structured object — NOT a paragraph. The five fields are:
+Then capture it as a structured object — NOT a paragraph. The six fields are:
 
 | Field | Purpose | Example |
 |---|---|---|
@@ -61,9 +61,12 @@ Then capture it as a structured object — NOT a paragraph. The five fields are:
 | `event` | Instrumented event key emitted from code, 128 characters or fewer, no spaces | `"signup_completed"` |
 | `metricType` | `binary` for conversion (fires 0/1) or `continuous` for a value (revenue, latency, count per user) | `"binary"` |
 | `metricAgg` | `once` (max 1 per user, for funnel conversion), `count` (tally all occurrences), `sum` (add numeric payloads), or `average` (mean of values per user) | `"once"` |
-| `description` | One-sentence rationale — why this metric decides go/no-go | `"Proportion of visitors that sign up — directly measures the H1 change."` |
+| `expectedDirection` | Which direction is better for the primary metric: `increase_good` or `decrease_good` | `"increase_good"` |
+| `description` | One-sentence rationale — why this metric decides go/no-go, including the better direction | `"Higher signup conversion is better because it directly measures the H1 change."` |
 
-If the user gives a vague metric name (e.g. "signup rate"), probe until the event key, metric type, and aggregation are concrete. Don't proceed with a half-defined metric.
+If the user gives a vague metric name (e.g. "signup rate"), probe until the event key, metric type, aggregation, and expected better direction are concrete. Don't proceed with a half-defined metric.
+
+MCP payload note: `featbit_release_decision_update_metrics` requires `metricName`, `metricEvent`, `metricType`, `metricAgg`, and `expectedDirection`. `expectedDirection` must be exactly `increase_good` or `decrease_good`; missing or invalid values should be treated as an error and corrected before retrying. Do not invent `metricDirection`, `primaryMetricDirection`, or primary-metric `inverse` in the update payload.
 
 ### Define guardrails (2–3 maximum)
 
@@ -96,10 +99,13 @@ Check: can the current codebase emit this event? If not, instrumentation must be
 
 - Do not allow exposure to start without confirmed instrumentation
 - One primary metric only — push back on lists
+- Primary metric direction is mandatory. Capture whether higher or lower is better before writing metrics.
 - Guardrails protect against harm, not success. They should not be optimized for.
+- Guardrail direction means alarm direction (`increase_bad` or `decrease_bad`); do not reuse those labels for the primary metric.
 - When multiple experiments share a flag or user pool, verify traffic allocation strategy before calculating sample size. Sequential experiments get full traffic; concurrent experiments with mutual exclusion get only their slice. An underpowered experiment due to traffic splitting is worse than waiting for a sequential slot. See `reversible-exposure-control` → [multi-experiment-traffic.md](../reversible-exposure-control/references/multi-experiment-traffic.md) for patterns.
-- Hand off to `reversible-exposure-control` when instrumentation is complete
-- Hand off to `evidence-analysis` once data collection is underway
+- Hand off to `experiment-workspace` when instrumentation is complete and the user is ready to start or configure a run
+- Hand off to `evidence-analysis` once data collection is underway and analysis output exists
+- After CF-05 is persisted, tell the user the UI next step: mark Measuring satisfied only after event instrumentation and run setup are ready; then proceed to data collection / analysis.
 
 ### Persist State
 
@@ -111,6 +117,7 @@ MCP("featbit_release_decision_update_metrics", experimentId=experiment_id, updat
     "metricEvent": primary_metric_event,
     "metricType": primary_metric_type,
     "metricAgg": primary_metric_agg,
+    "expectedDirection": primary_metric_expected_direction,
     "metricDescription": primary_metric_description,
     "guardrails": guardrails_json,
 })
@@ -120,7 +127,7 @@ MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, up
 MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="measuring")
 ```
 
-`metricName`, `metricEvent`, `metricType`, and `metricAgg` are all required. The web UI renders each field as its own column (NAME / EVENT / TYPE / AGG) — do NOT jam a paragraph into `metricName`. Keep `metricName` 80 characters or fewer, and keep `metricEvent` as a key with no spaces. Rationale goes in `metricDescription`.
+`metricName`, `metricEvent`, `metricType`, `metricAgg`, and `expectedDirection` are all required. The web UI renders each field as its own column — do NOT jam a paragraph into `metricName`. Keep `metricName` 80 characters or fewer, and keep `metricEvent` as a key with no spaces. Rationale goes in `metricDescription`; better direction goes in `expectedDirection`.
 
 **`guardrails` must be a JSON array** of objects with the primary-metric shape plus `direction` (`increase_bad` or `decrease_bad`). One entry per guardrail, never a single string or newline-separated text.
 
@@ -162,6 +169,7 @@ def design_measurement(experiment_id, user_message):
         "metricEvent": primary_metric.event,
         "metricType": primary_metric.metric_type,       # binary | continuous
         "metricAgg":  primary_metric.metric_agg,        # once | count | sum | average
+        "expectedDirection": primary_metric.expected_direction,  # increase_good | decrease_good
         "metricDescription": primary_metric.rationale,
         "guardrails": guardrails_json,
     })
@@ -169,7 +177,8 @@ def design_measurement(experiment_id, user_message):
         "lastAction": "Metrics defined",
     })
     MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="measuring")
-    Skill("reversible-exposure-control", experiment_id)
+    say("In the UI, mark the Measuring step satisfied only after the event contract is saved and instrumentation is ready; then continue to the run setup / data collection prompt.")
+    Skill("experiment-workspace", experiment_id)
 ```
 
 ## Signal Inference
@@ -178,6 +187,7 @@ def design_measurement(experiment_id, user_message):
 |---|---|
 | `hypothesis` empty | Redirect to `hypothesis-design` |
 | User lists multiple "primary" metrics | Push back — ask which ONE decides the go/no-go |
+| Primary metric lacks better direction | Ask whether higher or lower is better before writing metrics |
 | Guardrail count > 3 | Ask which 2–3 matter most; trim the rest to diagnostics |
 | Instrumentation not confirmed | Block stage advance; do not set stage to `measuring` |
 | Traffic split planned (concurrent experiments) | Flag that sample size must be calculated on the reduced traffic slice, not full traffic |

@@ -172,6 +172,7 @@ If there is no single primary metric, the decision is not yet sharp enough.
 **What the agent should do:** Define:
 
 - one primary success metric,
+- the direction that makes the primary metric better,
 - two or three guardrails,
 - the event shape required to measure them,
 - and where in the user journey the event should be emitted.
@@ -276,6 +277,7 @@ For a detailed routing guide, see [references/skill-routing-guide.md](references
 - Do not ask the user to choose many metrics to compensate for a vague hypothesis.
 - Do not claim certainty when the evidence only supports a directional judgment.
 - Do not finish a cycle without recording the learning state for the next one.
+- When the user asks "what next", "how do I proceed", or "next step" and the current CF stage completion criteria are satisfied, answer with the concrete UI transition: click the current prompt card's **Satisfied** button, move to the next stage in the stage bar, then copy/run the next stage's Agent Prompt. Do not ask who will create the feature flag; tell the user what flag/metric/event contract to carry into the UI.
 - Do not narrate internal tool debugging, script fixes, path resolution, or runtime diagnosis to the user unless a blocker remains after you have already tried to recover.
 
 ---
