@@ -145,7 +145,7 @@ Rules:
 - Inner keys are variant values — must match `controlVariant` and `treatmentVariant` in the experiment record
 - `n` = unique users exposed to that variant in the observation window
 - `k` = unique users who fired the event at least once, out of those `n`
-- Source: see `references/data-source-guide.md` for how events land in track-service
+- Source: see `workspace-data-source-guide.md` for how events land in track-service
 
 ---
 

@@ -7,7 +7,7 @@ description: FeatBit experiment dashboard usage: reading per-variant results, co
 
 **Vendor:** FeatBit  
 **Tool type:** Experiment dashboard + Bayesian analysis  
-**Default for skill:** `evidence-analysis`
+**Default stage:** evidence analysis (CF-06/07)
 
 This file describes how to use FeatBit's experiment features to read and interpret A/B test results.
 
@@ -75,11 +75,11 @@ These are guidelines, not rules. Business context, guardrail health, and traffic
 ## After Making a Decision
 
 1. Persist the decision to the database via `featbit_release_decision_update_run` (`decision`, `decisionSummary`, `decisionReason`, and `status: "decided"`)
-2. If **CONTINUE**: run the rollout expansion command via `tool-featbit-cli.md`
+2. If **CONTINUE**: run the rollout expansion command via `exposure-tool-featbit-cli.md`
 3. If **ROLLBACK CANDIDATE**: disable the flag immediately, then archive the experiment
 4. If **INCONCLUSIVE**: extend the window or close without action and document why
 
-Archive the experiment after the flag is fully rolled out or rolled back to preserve the result data for the `learning-capture` cycle.
+Archive the experiment after the flag is fully rolled out or rolled back to preserve the result data for the the learning capture stage cycle.
 
 ---
 

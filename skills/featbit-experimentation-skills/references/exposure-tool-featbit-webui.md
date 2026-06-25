@@ -7,9 +7,9 @@ description: FeatBit web UI operations: when to use, targeting rules setup, mult
 
 **Vendor:** FeatBit  
 **Tool type:** Web UI (browser, FeatBit management console)  
-**Default for skill:** `reversible-exposure-control`
+**Default stage:** exposure control (CF-03/04)
 
-The FeatBit web UI is the complete management interface — it covers every flag operation (create, enable, disable, rollout, targeting, archive, delete) plus capabilities that only exist in the UI (multi-variant editors, targeting rule chains, sendToExperiment, audit trail, RBAC). [tool-featbit-cli.md](tool-featbit-cli.md) provides an automation-friendly subset of these same operations for use in terminals and agent workflows.
+The FeatBit web UI is the complete management interface — it covers every flag operation (create, enable, disable, rollout, targeting, archive, delete) plus capabilities that only exist in the UI (multi-variant editors, targeting rule chains, sendToExperiment, audit trail, RBAC). [exposure-tool-featbit-cli.md](exposure-tool-featbit-cli.md) provides an automation-friendly subset of these same operations for use in terminals and agent workflows.
 
 ## TOC
 

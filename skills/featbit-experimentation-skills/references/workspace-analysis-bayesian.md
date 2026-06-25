@@ -190,7 +190,7 @@ After reaching the floor, re-trigger analysis periodically via the web app:
 
 Call `featbit_release_decision_analyze_run` with `experimentId`, `runId`, and `forceFresh: true`.
 
-Then read `analysisResult` from the run record via `featbit_release_decision_get_experiment` and check `risk[trt]` and `risk[ctrl]`. These are outputs computed server-side by the analyze endpoint — there is no configuration field for them. The judgment of "low enough" is made by you or the agent running `evidence-analysis` by comparing the values to the reference ranges in the Decision Guide below.
+Then read `analysisResult` from the run record via `featbit_release_decision_get_experiment` and check `risk[trt]` and `risk[ctrl]`. These are outputs computed server-side by the analyze endpoint — there is no configuration field for them. The judgment of "low enough" is made by you or the agent running the evidence analysis stage by comparing the values to the reference ranges in the Decision Guide below.
 
 How risk behaves as sample grows:
 
@@ -201,7 +201,7 @@ Large sample   →  narrow posterior →  one side's risk drops               �
 
 Risk falls as sample size grows and the posterior narrows. A large true effect causes rapid convergence. A small or absent effect causes risk to plateau — both sides stay uncertain — which is the correct signal that the experiment is genuinely inconclusive.
 
-The judgment step — "is risk[trt] low enough to ship?" — belongs to `evidence-analysis`, not to this script.
+The judgment step — "is risk[trt] low enough to ship?" — belongs to the evidence analysis stage, not to this script.
 
 ---
 

@@ -161,9 +161,9 @@ Call `featbit_release_decision_analyze_run` with `forceFresh: true`.
 **Important caveat**: bandit experiments produce unequal traffic splits (e.g. 90/10 by the end). This means:
 - The δ (delta) estimate in `analysisResult` is valid but has wider uncertainty than a balanced 50/50 design
 - `best_arm_probabilities` from the final bandit `analysisResult` is the most reliable decision signal
-- Use both together when handing off to `evidence-analysis`
+- Use both together when handing off to the evidence analysis stage
 
-Hand off to `evidence-analysis` with:
+Hand off to the evidence analysis stage with:
 - The experiment's `analysisResult` (final Bayesian analysis)
 - The bandit `analysisResult` (final best_arm_probabilities)
 - The experiment record fields
@@ -177,4 +177,4 @@ Hand off to `evidence-analysis` with:
 | Burn-in | Collect data, do not reweight | Until every arm ≥ 100 users |
 | Exploit | Trigger `featbit_release_decision_analyze_run` (run is on `method: bandit`), apply the returned weights to FeatBit | Every 6–24 hours |
 | Stopping | `best_arm_probabilities >= 0.95` | Check each cycle |
-| Wrap-up | Switch run to `method: bayesian_ab`, trigger `featbit_release_decision_analyze_run`, hand off to `evidence-analysis` | Once, after stopping |
+| Wrap-up | Switch run to `method: bayesian_ab`, trigger `featbit_release_decision_analyze_run`, hand off to the evidence analysis stage | Once, after stopping |

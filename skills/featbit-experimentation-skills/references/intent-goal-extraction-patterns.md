@@ -46,7 +46,7 @@ Response: ask what the outcome would be if this tactic worked perfectly.
 
 ## Goal Validation Checklist
 
-Before handing off to `hypothesis-design`:
+Before handing off to the hypothesis stage:
 
 - [ ] Goal is a change in user behavior or a business metric (not a feature shipped)
 - [ ] Audience is named

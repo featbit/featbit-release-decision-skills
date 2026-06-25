@@ -1,6 +1,6 @@
 ---
 name: Hypothesis Template
-description: Five-component hypothesis template, good/bad examples, falsifiability check, and what belongs here vs. in evidence-analysis.
+description: Five-component hypothesis template, good/bad examples, falsifiability check, and what belongs here vs. in evidence analysis stage.
 ---
 
 # Hypothesis Template

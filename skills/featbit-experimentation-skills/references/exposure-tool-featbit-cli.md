@@ -7,9 +7,9 @@ description: FeatBit CLI (.NET 10): config management, flag list/create/toggle/a
 
 **Vendor:** FeatBit  
 **Tool type:** CLI (.NET 10)  
-**Default for skill:** `reversible-exposure-control`
+**Default stage:** exposure control (CF-03/04)
 
-The FeatBit CLI provides automation-friendly access to a subset of operations that are also available in the FeatBit web UI: config management, flag inspection, and flag management (create, toggle, archive, rollout, evaluate). The web UI is the complete management interface and can do everything the CLI can do plus more — see [tool-featbit-webui.md](tool-featbit-webui.md). Use the CLI when you need scripted, pipeline, or agent-driven flag operations without opening a browser.
+The FeatBit CLI provides automation-friendly access to a subset of operations that are also available in the FeatBit web UI: config management, flag inspection, and flag management (create, toggle, archive, rollout, evaluate). The web UI is the complete management interface and can do everything the CLI can do plus more — see [exposure-tool-featbit-webui.md](exposure-tool-featbit-webui.md). Use the CLI when you need scripted, pipeline, or agent-driven flag operations without opening a browser.
 
 ## TOC
 

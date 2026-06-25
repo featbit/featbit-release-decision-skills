@@ -6,7 +6,7 @@ description: Decision table (P(win) + risk), guardrail interpretation, observati
 
 ## Decision Guide
 
-Use P(win) and risk together to frame the decision for `evidence-analysis`:
+Use P(win) and risk together to frame the decision for the evidence analysis stage:
 
 | P(win) | risk[trt] | Interpretation |
 |--------|-----------|----------------|
@@ -76,18 +76,18 @@ Fix the root cause, reset the observation window, and collect fresh data. Do not
 This doc sits between data collection and the final decision:
 
 ```
-measurement-design           ← defines the metric and instrumentation
+measurement stage           ← defines the metric and instrumentation
     ↓
-experiment-workspace         ← creates the experiment + run records
+experiment workspace stage         ← creates the experiment + run records
     ↓
 POST /analyze (bayesian_ab)  ← YOU ARE HERE: writes inputData + analysisResult
     ↓
-evidence-analysis            ← reads analysisResult, frames CONTINUE / PAUSE / ROLLBACK
+evidence analysis stage            ← reads analysisResult, frames CONTINUE / PAUSE / ROLLBACK
     ↓
-learning-capture             ← records what was learned
+learning capture stage             ← records what was learned
 ```
 
-The agent triggers analysis via `featbit_release_decision_analyze_run`. After `analysisResult` is written to the run record, the agent hands off to `evidence-analysis` so the decision can be tied back to the original hypothesis.
+The agent triggers analysis via `featbit_release_decision_analyze_run`. After `analysisResult` is written to the run record, the agent hands off to the evidence analysis stage so the decision can be tied back to the original hypothesis.
 
 ---
 

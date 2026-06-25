@@ -104,7 +104,7 @@ holdout:
   # Use slugs: <original-slug>-holdout-30d, -60d, -90d
 ```
 
-This block is documentation only — it does not affect script behavior. It ensures the holdout plan is visible during `evidence-analysis` and `learning-capture`.
+This block is documentation only — it does not affect script behavior. It ensures the holdout plan is visible during the evidence analysis stage and the learning capture stage.
 
 ---
 

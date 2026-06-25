@@ -7,7 +7,7 @@ description: FeatBit SDK track() usage, experiment event association via sendToE
 
 **Vendor:** FeatBit  
 **Tool type:** SDK (server-side and client-side)  
-**Default for skill:** `measurement-design`
+**Default stage:** measurement design (CF-05)
 
 This file documents how to use the FeatBit SDK to emit custom events that support experiment analysis.
 
