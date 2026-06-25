@@ -249,6 +249,7 @@ Use when a change needs reversibility, flag contract, targeting, rollout, rollba
 Read:
 
 - [references/exposure-pm-dev-handoff.md](references/exposure-pm-dev-handoff.md)
+- [references/exposure-mcp-lifecycle.md](references/exposure-mcp-lifecycle.md)
 - [references/exposure-rollout-patterns.md](references/exposure-rollout-patterns.md)
 - [references/exposure-multi-experiment-traffic.md](references/exposure-multi-experiment-traffic.md)
 - [references/exposure-tool-featbit-webui.md](references/exposure-tool-featbit-webui.md) only when the user needs concrete FeatBit UI operation guidance.
@@ -259,10 +260,12 @@ Rules:
 
 - Confirm a hypothesis exists before flag work.
 - Do not ask who should create the flag; define the contract and the UI/automation next step.
+- Treat FeatBit as the source of truth for flag binding. Experiment `constraints` may propose a flag key, but the flag is not bound until `featbit_release_decision_get_feature_flag` succeeds or `featbit_release_decision_create_feature_flag` succeeds and is read back.
 - Do not create or mutate a flag until the required contract fields are known: flag name, key, type, variants, default/off variation, target audience, protected audience, rollout split, rollback trigger, and dispatch key when rollout is percentage-based.
-- If feature-flag MCP tools are available, use them after the contract is complete: read existing flags with `featbit_release_decision_get_feature_flag`, create missing flags with `featbit_release_decision_create_feature_flag`, and configure rollout/targeting with `featbit_release_decision_update_feature_flag_targeting`.
+- If feature-flag MCP tools are available, follow [references/exposure-mcp-lifecycle.md](references/exposure-mcp-lifecycle.md): read existing flags with `featbit_release_decision_get_feature_flag`; if the tool returns `ResourceNotFound`, create the missing flag with `featbit_release_decision_create_feature_flag`; read the created flag back; then configure rollout/targeting with `featbit_release_decision_update_feature_flag_targeting`.
 - Direct targeting update is the default MCP path. Use change-request mode only when the user supplies reviewer ids, explicitly asks for approval/change-request mode, or the local operating policy requires it.
 - If a required flag field is missing or invalid, ask for that field before calling the flag MCP tool. Do not invent reviewer ids, user segments, or production targeting rules.
+- Do not set Exposure as satisfied, do not say the flag is bound, and do not advance from CF-03/04 when `get_feature_flag` still returns `ResourceNotFound`.
 - Never start at 100% unless protected-audience targeting is explicit.
 - For multiple experiments on the same flag or surface, classify as sequential, mutual-exclusion, or orthogonal. Sample size must use the actual traffic slice.
 
@@ -271,9 +274,11 @@ Persist:
 ```python
 if MCP.has_tool("featbit_release_decision_get_feature_flag"):
     flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
-    # If the flag is missing and the contract is complete, create it.
-    # If rollout/targeting should change, pass the latest flag.revision and a complete targeting object.
-    MCP("featbit_release_decision_update_feature_flag_targeting", experimentId=experiment_id, key=flag_key, request={
+    if flag.error == "ResourceNotFound":
+        MCP("featbit_release_decision_create_feature_flag", experimentId=experiment_id, request=flag_contract)
+        flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
+    assert not flag.error, "feature flag must exist before Exposure can be satisfied"
+    MCP("featbit_release_decision_update_feature_flag_targeting", experimentId=experiment_id, key=flag.key, request={
         "revision": flag.revision,
         "targeting": targeting,
         "comment": "Initial experiment rollout",
@@ -283,7 +288,7 @@ if MCP.has_tool("featbit_release_decision_get_feature_flag"):
         # "reason": "Initial experiment rollout"
     })
 MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
-    "constraints": flag_contract_and_rollout,
+    "constraints": flag_contract_and_rollout_with_actual_flag_key_and_variations,
     "lastAction": "Exposure contract defined",
 })
 MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="implementing")

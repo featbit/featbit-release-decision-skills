@@ -60,7 +60,7 @@ User-facing task: make the change reversible with a FeatBit-managed flag, real f
 
 Apply CF-03 and CF-04.
 
-Use FeatBit flag MCP tools when available. Read existing flags and real variations with `featbit_release_decision_get_feature_flag`; create a missing flag with `featbit_release_decision_create_feature_flag` only after the flag contract is complete; update rollout/targeting with `featbit_release_decision_update_feature_flag_targeting`.
+Use FeatBit flag MCP tools when available. Read existing flags and real variations with `featbit_release_decision_get_feature_flag`; if it returns `ResourceNotFound`, create the missing flag with `featbit_release_decision_create_feature_flag` only after the flag contract is complete; read the created flag back; update rollout/targeting with `featbit_release_decision_update_feature_flag_targeting`.
 
 If direct flag tooling is unavailable, define the concrete flag contract, variants, rollout, and rollback rules, then tell the user what to create or bind in the FeatBit UI.
 
@@ -75,6 +75,8 @@ Completion criteria:
 Do not ask for metric event keys or observed data.
 
 Persist only concrete flag, audience, rollout, and rollback decisions through MCP. When calling `featbit_release_decision_update_feature_flag_targeting`, pass the latest flag `revision` and a complete targeting object. Direct update is the default; use change-request mode only if reviewer ids are known or approval is explicitly required.
+
+Do not mark Exposure satisfied when the experiment only contains a proposed flag key in `constraints`. A flag is bound only after `get_feature_flag` succeeds or `create_feature_flag` succeeds and the flag is read back successfully.
 
 ## Stage: measuring
 
