@@ -105,7 +105,7 @@ Writes:
 
 ## Applying Weights to FeatBit
 
-After reading the `analysisResult`, update the feature flag's variant rollout via the FeatBit API.
+After reading the `analysisResult`, update the feature flag's variant rollout through the configured FeatBit MCP tools when they are available.
 
 FeatBit uses cumulative range format for rollout: `[start, end]` where end − start = weight.
 
@@ -123,14 +123,33 @@ for (const [arm, weight] of Object.entries(banditWeights)) {
 }
 ```
 
-**FeatBit API endpoint:**
-```
-PUT /api/v1/envs/{envId}/feature-flags/{flagKey}/targeting
+**MCP flow:**
+```python
+flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
+targeting = flag.targeting
+targeting.fallthrough.variations = rollout_variations_from_bandit_weights
+MCP("featbit_release_decision_update_feature_flag_targeting", experimentId=experiment_id, key=flag_key, request={
+    "revision": flag.revision,
+    "targeting": targeting,
+    "comment": "Apply bandit traffic weights"
+})
 ```
 
 Update the `fallthrough.variations[].rollout` field with the computed ranges.
 
-This step requires FeatBit system integration. Full automation (scheduled reweighting without manual intervention) requires implementing a scheduler that calls `featbit_release_decision_analyze_run` periodically and applies the returned weights via the FeatBit API.
+Direct update is the default. Use change-request mode only when reviewer ids are supplied or approval is explicitly required:
+
+```python
+MCP("featbit_release_decision_update_feature_flag_targeting", experimentId=experiment_id, key=flag_key, request={
+    "revision": flag.revision,
+    "targeting": targeting,
+    "useChangeRequest": True,
+    "reviewers": reviewer_ids,
+    "reason": "Apply bandit traffic weights"
+})
+```
+
+This step requires FeatBit system integration. Full automation (scheduled reweighting without manual intervention) requires a scheduler that calls `featbit_release_decision_analyze_run` periodically and applies the returned weights through `featbit_release_decision_update_feature_flag_targeting`.
 
 > **Book reference** — *Experimentation for Engineers*, Chapter 3: the book describes the full Thompson Sampling feedback loop as a continuous "sample → estimate posterior → allocate → repeat" cycle. The scheduling interval (how often to reweight) is a tuning parameter: shorter intervals react faster but add noise; longer intervals are more stable but slower to adapt.
 
@@ -175,6 +194,6 @@ Hand off to the evidence analysis stage with:
 | Phase | Action | Frequency |
 |-------|--------|-----------|
 | Burn-in | Collect data, do not reweight | Until every arm ≥ 100 users |
-| Exploit | Trigger `featbit_release_decision_analyze_run` (run is on `method: bandit`), apply the returned weights to FeatBit | Every 6–24 hours |
+| Exploit | Trigger `featbit_release_decision_analyze_run` (run is on `method: bandit`), apply the returned weights with `featbit_release_decision_update_feature_flag_targeting` | Every 6–24 hours |
 | Stopping | `best_arm_probabilities >= 0.95` | Check each cycle |
 | Wrap-up | Switch run to `method: bayesian_ab`, trigger `featbit_release_decision_analyze_run`, hand off to the evidence analysis stage | Once, after stopping |

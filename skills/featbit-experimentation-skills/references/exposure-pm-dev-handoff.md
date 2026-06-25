@@ -7,7 +7,7 @@ description: Handoff template and required fields for passing a complete feature
 
 Use this reference when the current user owns the release decision but does not own the codebase, the feature flag wrapper, or the production flag tooling.
 
-The goal is not to tell engineering which CLI command to run. The goal is to give engineering a complete and unambiguous implementation contract.
+The goal is not to tell engineering which command to run. The goal is to give engineering a complete and unambiguous implementation contract.
 
 ## What the handoff must answer
 
@@ -146,7 +146,7 @@ If the engineering team wraps FeatBit behind its own abstraction:
 - specify the dispatch key and targeting intent the wrapper or flag platform must preserve
 - specify whether the flag should be created manually, by pipeline, or by internal tooling
 
-The PM or experiment owner does not need to dictate whether engineering uses FeatBit CLI, MCP, REST API, Web UI, or an internal platform.
+The PM or experiment owner does not need to dictate whether engineering uses FeatBit MCP, REST API, Web UI, or an internal platform.
 
 ## Minimal good handoff
 

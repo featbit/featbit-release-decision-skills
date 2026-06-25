@@ -44,6 +44,9 @@ Required MCP tools:
 | `featbit_release_decision_update_run` | Update run setup, status, decision, and learning fields |
 | `featbit_release_decision_analyze_run` | Run server-side analysis and persist `inputData` / `analysisResult` |
 | `featbit_release_decision_add_message` | Persist user-visible conversation or durable decision notes only |
+| `featbit_release_decision_get_feature_flag` | Read the real FeatBit flag, revision, variations, and targeting for the experiment environment |
+| `featbit_release_decision_create_feature_flag` | Create a FeatBit-managed feature flag after the exposure contract is complete |
+| `featbit_release_decision_update_feature_flag_targeting` | Update flag targeting/rollout directly, or create a change request when `useChangeRequest` or reviewers are provided |
 
 The MCP client configuration must provide normal FeatBit auth headers: `Authorization`, `Organization`, and `Workspace`. Do not ask for or pass a per-experiment access token.
 
@@ -248,7 +251,7 @@ Read:
 - [references/exposure-pm-dev-handoff.md](references/exposure-pm-dev-handoff.md)
 - [references/exposure-rollout-patterns.md](references/exposure-rollout-patterns.md)
 - [references/exposure-multi-experiment-traffic.md](references/exposure-multi-experiment-traffic.md)
-- [references/exposure-tool-featbit-webui.md](references/exposure-tool-featbit-webui.md) or [references/exposure-tool-featbit-cli.md](references/exposure-tool-featbit-cli.md) only when the user needs concrete FeatBit operation guidance.
+- [references/exposure-tool-featbit-webui.md](references/exposure-tool-featbit-webui.md) only when the user needs concrete FeatBit UI operation guidance.
 
 Default output is a concrete feature flag and exposure contract: flag name, stable key, type, variants, evaluation point, variant behavior, target audience, protected users, initial rollout, expansion checkpoints, stop conditions, rollback triggers, and metric-event requirements.
 
@@ -256,13 +259,29 @@ Rules:
 
 - Confirm a hypothesis exists before flag work.
 - Do not ask who should create the flag; define the contract and the UI/automation next step.
-- Do not claim to create or mutate a FeatBit flag through MCP unless a separate feature-flag tool is actually available.
+- Do not create or mutate a flag until the required contract fields are known: flag name, key, type, variants, default/off variation, target audience, protected audience, rollout split, rollback trigger, and dispatch key when rollout is percentage-based.
+- If feature-flag MCP tools are available, use them after the contract is complete: read existing flags with `featbit_release_decision_get_feature_flag`, create missing flags with `featbit_release_decision_create_feature_flag`, and configure rollout/targeting with `featbit_release_decision_update_feature_flag_targeting`.
+- Direct targeting update is the default MCP path. Use change-request mode only when the user supplies reviewer ids, explicitly asks for approval/change-request mode, or the local operating policy requires it.
+- If a required flag field is missing or invalid, ask for that field before calling the flag MCP tool. Do not invent reviewer ids, user segments, or production targeting rules.
 - Never start at 100% unless protected-audience targeting is explicit.
 - For multiple experiments on the same flag or surface, classify as sequential, mutual-exclusion, or orthogonal. Sample size must use the actual traffic slice.
 
 Persist:
 
 ```python
+if MCP.has_tool("featbit_release_decision_get_feature_flag"):
+    flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
+    # If the flag is missing and the contract is complete, create it.
+    # If rollout/targeting should change, pass the latest flag.revision and a complete targeting object.
+    MCP("featbit_release_decision_update_feature_flag_targeting", experimentId=experiment_id, key=flag_key, request={
+        "revision": flag.revision,
+        "targeting": targeting,
+        "comment": "Initial experiment rollout",
+        # Optional only when approval is required:
+        # "useChangeRequest": True,
+        # "reviewers": reviewer_ids,
+        # "reason": "Initial experiment rollout"
+    })
 MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
     "constraints": flag_contract_and_rollout,
     "lastAction": "Exposure contract defined",
@@ -270,7 +289,7 @@ MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, up
 MCP("featbit_release_decision_set_stage", experimentId=experiment_id, stage="implementing")
 ```
 
-When the user asks what next: mark Exposure satisfied, create/configure the flag in FeatBit UI or existing automation using the contract, then continue to Measuring / CF-05.
+When the user asks what next: mark Exposure satisfied, create/configure the flag through FeatBit MCP when available, otherwise use the FeatBit UI using the contract, then continue to Measuring / CF-05.
 
 ## CF-05: Design Measurement
 
@@ -328,6 +347,7 @@ Read:
 Rules:
 
 - Redirect upstream if hypothesis or primary metric is missing.
+- If feature-flag MCP tools are available, read the bound flag before run setup and use the actual variation values for `controlVariant` and `treatmentVariant`; do not rely on manual text when the API can provide the source of truth.
 - Resume an existing run for the same hypothesis instead of creating duplicates.
 - The database record is the experiment. No local sync scripts are needed.
 - Analysis must run through `featbit_release_decision_analyze_run`; do not inline-compute and write `analysisResult`.
@@ -403,6 +423,7 @@ Respect analyzer output:
 - Do not quote metrics that do not exist.
 - Do not override `verdict`, `p_harm`, or inverse-handled outputs silently.
 - If a guardrail direction looks misconfigured, ask the user to confirm and re-run after configuration changes.
+- Persist the decision first. If the user asks the agent to execute the rollout decision and feature-flag MCP tools are available, read the latest flag revision and call `featbit_release_decision_update_feature_flag_targeting` to expand, hold, or rollback the rollout. Use change-request mode only when reviewer ids are supplied or approval is required.
 
 Persist:
 

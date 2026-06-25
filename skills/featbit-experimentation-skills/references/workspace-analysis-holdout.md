@@ -31,7 +31,7 @@ These effects share one property: **they are temporary**. A holdout group runnin
 
 ## How It Works
 
-At full launch, adjust the feature flag traffic split to keep a small holdout group on the old version:
+At full launch, adjust the feature flag traffic split to keep a small holdout group on the old version. Use `featbit_release_decision_get_feature_flag` to read the latest flag revision and `featbit_release_decision_update_feature_flag_targeting` to apply the split when FeatBit MCP tools are available:
 
 ```
 Feature flag: new-onboarding-flow
@@ -126,7 +126,7 @@ Holdout groups sit **after** the A/B or Bandit experiment concludes. They are no
 
 | Checkpoint | Action |
 |-----------|--------|
-| Launch day | Set feature flag to 95/5; note `launched_at` in experiment record |
+| Launch day | Set feature flag to 95/5 with `featbit_release_decision_update_feature_flag_targeting` when available; note `launched_at` in experiment record |
 | Day 30 | Trigger analysis on the holdout-30d run via `featbit_release_decision_analyze_run` with `forceFresh: true` |
 | Day 60 | Repeat |
 | Day 90 | Repeat; decide whether to fully close the holdout group |

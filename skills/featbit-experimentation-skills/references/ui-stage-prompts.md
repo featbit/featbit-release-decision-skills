@@ -60,7 +60,7 @@ User-facing task: make the change reversible with a FeatBit-managed flag, real f
 
 Apply CF-03 and CF-04.
 
-Use separate FeatBit flag tools to inspect available flags and real flag variations only if those tools are actually available. The release-decision MCP persists experiment state; it does not create feature flags.
+Use FeatBit flag MCP tools when available. Read existing flags and real variations with `featbit_release_decision_get_feature_flag`; create a missing flag with `featbit_release_decision_create_feature_flag` only after the flag contract is complete; update rollout/targeting with `featbit_release_decision_update_feature_flag_targeting`.
 
 If direct flag tooling is unavailable, define the concrete flag contract, variants, rollout, and rollback rules, then tell the user what to create or bind in the FeatBit UI.
 
@@ -74,7 +74,7 @@ Completion criteria:
 
 Do not ask for metric event keys or observed data.
 
-Persist only concrete flag, audience, rollout, and rollback decisions through MCP.
+Persist only concrete flag, audience, rollout, and rollback decisions through MCP. When calling `featbit_release_decision_update_feature_flag_targeting`, pass the latest flag `revision` and a complete targeting object. Direct update is the default; use change-request mode only if reviewer ids are known or approval is explicitly required.
 
 ## Stage: measuring
 
@@ -113,6 +113,7 @@ Procedure:
 5. Pick exactly one API decision value: `CONTINUE`, `PAUSE`, `ROLLBACK`, or `INCONCLUSIVE`. If reasoning says `ROLLBACK CANDIDATE`, persist `ROLLBACK`.
 6. Write `decision`, `decisionSummary`, `decisionReason`, and `status="decided"` to the run.
 7. Write `lastAction="Decision: <category>"` to the experiment. Do not move stage to `learning` unless learning capture is explicitly requested.
+8. If the user asks to execute the rollout action and feature-flag MCP tools are available, read the latest flag revision and call `featbit_release_decision_update_feature_flag_targeting`. Do not silently mutate the flag as part of analysis.
 
 Guardrail inverse mapping: `increase_bad` means inverse true; `decrease_bad` means inverse false.
 

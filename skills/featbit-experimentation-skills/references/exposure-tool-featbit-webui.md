@@ -9,7 +9,9 @@ description: FeatBit web UI operations: when to use, targeting rules setup, mult
 **Tool type:** Web UI (browser, FeatBit management console)  
 **Default stage:** exposure control (CF-03/04)
 
-The FeatBit web UI is the complete management interface — it covers every flag operation (create, enable, disable, rollout, targeting, archive, delete) plus capabilities that only exist in the UI (multi-variant editors, targeting rule chains, sendToExperiment, audit trail, RBAC). [exposure-tool-featbit-cli.md](exposure-tool-featbit-cli.md) provides an automation-friendly subset of these same operations for use in terminals and agent workflows.
+The FeatBit web UI is the complete management interface — it covers every flag operation (create, enable, disable, rollout, targeting, archive, delete) plus capabilities that only exist in the UI (multi-variant editors, targeting rule chains, sendToExperiment, audit trail, RBAC).
+
+When the FeatBit experimentation MCP server exposes feature-flag tools, prefer MCP for agent-executed create/read/update operations and use the web UI for visual review, complex manual targeting, audit inspection, or RBAC decisions.
 
 ## TOC
 
@@ -30,9 +32,8 @@ The FeatBit web UI is the complete management interface — it covers every flag
 | Experiment configuration (sendToExperiment for A/B data collection) | Web UI |
 | Audit trail review — who changed what and when | Web UI |
 | RBAC management — who can operate flags in production | Web UI |
-| Scripted flag create / enable / disable / rollout percentage | CLI |
-| Flag state inspection before deployment | CLI |
-| Flag evaluation testing against a specific user | CLI |
+| Agent-executed flag create / read / targeting update | MCP |
+| Change-request update when reviewer ids are known | MCP |
 
 ---
 
@@ -108,4 +109,4 @@ This audit log matters when:
 - Compliance review (was this change authorized by the right role?)
 - Change management processes that require traceable approvals
 
-CLI operations (`flag toggle`, `flag set-rollout`, `flag create`) also record changes in the audit trail when using the management API token. The acting identity is the token owner — ensure each team member uses their own token rather than a shared one.
+MCP-driven flag operations also record changes in the audit trail through the FeatBit API. The acting identity is the MCP token owner or configured service identity, so production setups should use traceable identities rather than shared personal tokens.
