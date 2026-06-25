@@ -128,7 +128,8 @@ If `/analyze` returns `{ "status": "no_data" }`:
 
 If `/analyze` returns `{ "status": "no_data", "reason": "zero_users" }`:
 - Metric events are present but no users have been assigned to variants yet
-- Confirm the flag is enabled and the FeatBit SDK is calling `variation()` in the live codebase
+- Read the flag with `featbit_release_decision_get_feature_flag` and confirm `isEnabled` is true. If collection should be active and the toggle tool is available, ask the user to approve enabling the exact flag, call `featbit_release_decision_toggle_feature_flag` with `confirmedByUser: true` and `isEnabled: true`, then read back before retrying analysis.
+- Confirm the FeatBit SDK is calling `variation()` in the live codebase
 
 ---
 

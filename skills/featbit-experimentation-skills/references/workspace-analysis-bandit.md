@@ -128,19 +128,31 @@ for (const [arm, weight] of Object.entries(banditWeights)) {
 flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
 targeting = flag.targeting
 targeting.fallthrough.variations = rollout_variations_from_bandit_weights
+require_explicit_user_approval("apply bandit traffic weights", targeting)
 MCP("featbit_release_decision_update_feature_flag_targeting", experimentId=experiment_id, key=flag_key, request={
+    "confirmedByUser": True,
     "revision": flag.revision,
     "targeting": targeting,
     "comment": "Apply bandit traffic weights"
 })
+if not flag.isEnabled:
+    require_explicit_user_approval("enable feature flag while applying bandit weights", {"key": flag_key, "isEnabled": True})
+    MCP("featbit_release_decision_toggle_feature_flag", experimentId=experiment_id, key=flag_key, request={
+        "confirmedByUser": True,
+        "isEnabled": True,
+        "comment": "Enable flag while applying bandit traffic weights"
+    })
+    flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
+    assert flag.isEnabled, "feature flag must be enabled for bandit traffic allocation"
 ```
 
-Update the `fallthrough.variations[].rollout` field with the computed ranges.
+Update the `fallthrough.variations[].rollout` field with the computed ranges. Targeting changes alone do not enable the flag; if the bandit should be serving traffic, verify the toggle state after applying weights.
 
 Direct update is the default. Use change-request mode only when reviewer ids are supplied or approval is explicitly required:
 
 ```python
 MCP("featbit_release_decision_update_feature_flag_targeting", experimentId=experiment_id, key=flag_key, request={
+    "confirmedByUser": True,
     "revision": flag.revision,
     "targeting": targeting,
     "useChangeRequest": True,
@@ -194,6 +206,6 @@ Hand off to the evidence analysis stage with:
 | Phase | Action | Frequency |
 |-------|--------|-----------|
 | Burn-in | Collect data, do not reweight | Until every arm ≥ 100 users |
-| Exploit | Trigger `featbit_release_decision_analyze_run` (run is on `method: bandit`), apply the returned weights with `featbit_release_decision_update_feature_flag_targeting` | Every 6–24 hours |
+| Exploit | Trigger `featbit_release_decision_analyze_run` (run is on `method: bandit`), apply the returned weights with `featbit_release_decision_update_feature_flag_targeting`, and verify the flag is enabled with `featbit_release_decision_toggle_feature_flag` / readback when needed | Every 6–24 hours |
 | Stopping | `best_arm_probabilities >= 0.95` | Check each cycle |
 | Wrap-up | Switch run to `method: bayesian_ab`, trigger `featbit_release_decision_analyze_run`, hand off to the evidence analysis stage | Once, after stopping |

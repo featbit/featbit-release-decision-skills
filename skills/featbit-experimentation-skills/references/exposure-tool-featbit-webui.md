@@ -11,7 +11,7 @@ description: FeatBit web UI operations: when to use, targeting rules setup, mult
 
 The FeatBit web UI is the complete management interface — it covers every flag operation (create, enable, disable, rollout, targeting, archive, delete) plus capabilities that only exist in the UI (multi-variant editors, targeting rule chains, sendToExperiment, audit trail, RBAC).
 
-When the FeatBit experimentation MCP server exposes feature-flag tools, prefer MCP for agent-executed create/read/update operations and use the web UI for visual review, complex manual targeting, audit inspection, or RBAC decisions.
+When the FeatBit experimentation MCP server exposes feature-flag tools, prefer MCP for agent-executed create/read/update/toggle operations after explicit user approval, and use the web UI for visual review, complex manual targeting, audit inspection, or RBAC decisions.
 
 ## TOC
 
@@ -32,8 +32,9 @@ When the FeatBit experimentation MCP server exposes feature-flag tools, prefer M
 | Experiment configuration (sendToExperiment for A/B data collection) | Web UI |
 | Audit trail review — who changed what and when | Web UI |
 | RBAC management — who can operate flags in production | Web UI |
-| Agent-executed flag create / read / targeting update | MCP |
-| Change-request update when reviewer ids are known | MCP |
+| Agent-executed flag create / read / targeting update | MCP; mutations require explicit user approval and `confirmedByUser: true` |
+| Agent-executed flag enable / disable | MCP; requires explicit user approval and `confirmedByUser: true` |
+| Change-request update when reviewer ids are known | MCP; requires explicit user approval and `confirmedByUser: true` |
 
 ---
 
@@ -70,7 +71,7 @@ Targeting rules define which users see a specific variation before percentage ro
 1. Set targeting rules first (while flag is still OFF)
 2. Verify rules cover protected audiences (who must NOT see the candidate)
 3. Set rollout percentage to initial value (5–10%)
-4. Enable the flag
+4. After explicit user approval, enable the flag with `featbit_release_decision_toggle_feature_flag` and `confirmedByUser: true` when MCP is available, or with the UI toggle when it is not
 
 Protected audiences that must NOT see a new variant should be in an individual rule returning the default OFF variant. This rule must be placed above the rollout rule.
 

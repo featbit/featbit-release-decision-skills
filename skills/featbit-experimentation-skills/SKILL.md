@@ -45,10 +45,17 @@ Required MCP tools:
 | `featbit_release_decision_analyze_run` | Run server-side analysis and persist `inputData` / `analysisResult` |
 | `featbit_release_decision_add_message` | Persist user-visible conversation or durable decision notes only |
 | `featbit_release_decision_get_feature_flag` | Read the real FeatBit flag, revision, variations, and targeting for the experiment environment |
-| `featbit_release_decision_create_feature_flag` | Create a FeatBit-managed feature flag after the exposure contract is complete |
-| `featbit_release_decision_update_feature_flag_targeting` | Update flag targeting/rollout directly, or create a change request when `useChangeRequest` or reviewers are provided |
+| `featbit_release_decision_create_feature_flag` | Create a FeatBit-managed feature flag after the exposure contract is complete and the user explicitly approves |
+| `featbit_release_decision_update_feature_flag_targeting` | Update flag targeting/rollout directly, or create a change request when `useChangeRequest` or reviewers are provided, after explicit user approval |
+| `featbit_release_decision_toggle_feature_flag` | Enable or disable the FeatBit flag after targeting is configured, or during pause/rollback execution, after explicit user approval |
 
 The MCP client configuration must provide normal FeatBit auth headers: `Authorization`, `Organization`, and `Workspace`. Do not ask for or pass a per-experiment access token.
+
+Feature flag mutation safety:
+
+- Before calling `featbit_release_decision_create_feature_flag`, `featbit_release_decision_update_feature_flag_targeting`, or `featbit_release_decision_toggle_feature_flag`, summarize the exact flag key, environment implied by the experiment, operation, rollout/toggle state, and rollback consequence, then ask the user for explicit approval.
+- Set `confirmedByUser: true` in the MCP request only after the user clearly approves that exact operation. Do not infer approval from earlier setup discussion, a stage transition, or an analysis recommendation.
+- If the user has not approved, stop before the MCP mutation and state the proposed operation awaiting approval.
 
 Valid values:
 
@@ -262,7 +269,9 @@ Rules:
 - Do not ask who should create the flag; define the contract and the UI/automation next step.
 - Treat FeatBit as the source of truth for flag binding. Experiment `constraints` may propose a flag key, but the flag is not bound until `featbit_release_decision_get_feature_flag` succeeds or `featbit_release_decision_create_feature_flag` succeeds and is read back.
 - Do not create or mutate a flag until the required contract fields are known: flag name, key, type, variants, default/off variation, target audience, protected audience, rollout split, rollback trigger, and dispatch key when rollout is percentage-based.
-- If feature-flag MCP tools are available, follow [references/exposure-mcp-lifecycle.md](references/exposure-mcp-lifecycle.md): read existing flags with `featbit_release_decision_get_feature_flag`; if the tool returns `ResourceNotFound`, create the missing flag with `featbit_release_decision_create_feature_flag`; read the created flag back; then configure rollout/targeting with `featbit_release_decision_update_feature_flag_targeting`.
+- If feature-flag MCP tools are available, follow [references/exposure-mcp-lifecycle.md](references/exposure-mcp-lifecycle.md): read existing flags with `featbit_release_decision_get_feature_flag`; if the tool returns `ResourceNotFound`, create the missing flag with `featbit_release_decision_create_feature_flag`; read the created flag back; configure rollout/targeting with `featbit_release_decision_update_feature_flag_targeting`; then call `featbit_release_decision_toggle_feature_flag` only when exposure should begin now or a run is moving to `collecting`.
+- Targeting updates do not enable a flag. If the user asks to start exposure, launch, collect, expand, pause, or rollback and the toggle tool is available, operate the flag toggle through `featbit_release_decision_toggle_feature_flag`; do not send the user to the FeatBit UI only to switch the flag on or off.
+- Create, targeting update, and toggle are production-impacting mutations. Ask for explicit user approval immediately before each mutation and pass `confirmedByUser: true` only for the approved call.
 - Direct targeting update is the default MCP path. Use change-request mode only when the user supplies reviewer ids, explicitly asks for approval/change-request mode, or the local operating policy requires it.
 - If a required flag field is missing or invalid, ask for that field before calling the flag MCP tool. Do not invent reviewer ids, user segments, or production targeting rules.
 - Do not set Exposure as satisfied, do not say the flag is bound, and do not advance from CF-03/04 when `get_feature_flag` still returns `ResourceNotFound`.
@@ -275,10 +284,14 @@ Persist:
 if MCP.has_tool("featbit_release_decision_get_feature_flag"):
     flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
     if flag.error == "ResourceNotFound":
+        require_explicit_user_approval("create feature flag", flag_contract)
+        flag_contract["confirmedByUser"] = True
         MCP("featbit_release_decision_create_feature_flag", experimentId=experiment_id, request=flag_contract)
         flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
     assert not flag.error, "feature flag must exist before Exposure can be satisfied"
+    require_explicit_user_approval("update feature flag targeting", targeting)
     MCP("featbit_release_decision_update_feature_flag_targeting", experimentId=experiment_id, key=flag.key, request={
+        "confirmedByUser": True,
         "revision": flag.revision,
         "targeting": targeting,
         "comment": "Initial experiment rollout",
@@ -287,6 +300,15 @@ if MCP.has_tool("featbit_release_decision_get_feature_flag"):
         # "reviewers": reviewer_ids,
         # "reason": "Initial experiment rollout"
     })
+    if exposure_should_start_now and MCP.has_tool("featbit_release_decision_toggle_feature_flag"):
+        require_explicit_user_approval("enable feature flag", {"key": flag.key, "isEnabled": True})
+        MCP("featbit_release_decision_toggle_feature_flag", experimentId=experiment_id, key=flag.key, request={
+            "confirmedByUser": True,
+            "isEnabled": True,
+            "comment": "Enable flag for initial experiment exposure",
+        })
+        flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag.key)
+        assert flag.isEnabled, "feature flag must be enabled before collecting exposure data"
 MCP("featbit_release_decision_update_experiment", experimentId=experiment_id, update={
     "constraints": flag_contract_and_rollout_with_actual_flag_key_and_variations,
     "lastAction": "Exposure contract defined",
@@ -353,6 +375,8 @@ Rules:
 
 - Redirect upstream if hypothesis or primary metric is missing.
 - If feature-flag MCP tools are available, read the bound flag before run setup and use the actual variation values for `controlVariant` and `treatmentVariant`; do not rely on manual text when the API can provide the source of truth.
+- When starting or resuming collection, verify the bound flag is enabled. If `isEnabled` is false and `featbit_release_decision_toggle_feature_flag` is available, enable it, read the flag back, and set `observationStart` no earlier than the enable time. If the toggle tool is missing, stop and ask the user to register the latest MCP tools instead of pretending collection has started.
+- Starting collection by enabling a flag still requires explicit user approval. Do not set `confirmedByUser: true` unless the user has approved that toggle in this turn or an immediately preceding approval response.
 - Resume an existing run for the same hypothesis instead of creating duplicates.
 - The database record is the experiment. No local sync scripts are needed.
 - Analysis must run through `featbit_release_decision_analyze_run`; do not inline-compute and write `analysisResult`.
@@ -365,6 +389,16 @@ Start a run:
 ```python
 state = MCP("featbit_release_decision_create_run", experimentId=experiment_id)
 run_id = newest_run_id(state)
+flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
+if not flag.isEnabled:
+    require_explicit_user_approval("enable feature flag before collection", {"key": flag_key, "isEnabled": True})
+    MCP("featbit_release_decision_toggle_feature_flag", experimentId=experiment_id, key=flag_key, request={
+        "confirmedByUser": True,
+        "isEnabled": True,
+        "comment": "Enable flag before starting experiment collection",
+    })
+    flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
+    assert flag.isEnabled, "feature flag must be enabled before the run can collect data"
 MCP("featbit_release_decision_update_run", experimentId=experiment_id, runId=run_id, update={
     "slug": slug,
     "status": "collecting",
@@ -428,7 +462,7 @@ Respect analyzer output:
 - Do not quote metrics that do not exist.
 - Do not override `verdict`, `p_harm`, or inverse-handled outputs silently.
 - If a guardrail direction looks misconfigured, ask the user to confirm and re-run after configuration changes.
-- Persist the decision first. If the user asks the agent to execute the rollout decision and feature-flag MCP tools are available, read the latest flag revision and call `featbit_release_decision_update_feature_flag_targeting` to expand, hold, or rollback the rollout. Use change-request mode only when reviewer ids are supplied or approval is required.
+- Persist the decision first. If the user asks the agent to execute the rollout decision and feature-flag MCP tools are available, read the latest flag revision and call `featbit_release_decision_update_feature_flag_targeting` to expand, hold, or rollback the rollout. Use `featbit_release_decision_toggle_feature_flag` to enable a launch/expansion when the flag is off, or to disable exposure for an immediate pause/rollback. Use change-request mode only when reviewer ids are supplied or approval is required.
 
 Persist:
 
