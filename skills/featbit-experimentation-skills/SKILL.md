@@ -42,6 +42,7 @@ Required MCP tools:
 | `featbit_release_decision_update_metrics` | Write primary metric and guardrails |
 | `featbit_release_decision_create_run` | Create an experiment run |
 | `featbit_release_decision_update_run` | Update run setup, status, decision, and learning fields |
+| `featbit_release_decision_update_run_traffic` | Configure a run's analysis method, control/treatment roles, layer eligibility, and per-variation analysis sampling |
 | `featbit_release_decision_analyze_run` | Run server-side analysis and persist `inputData` / `analysisResult` |
 | `featbit_release_decision_add_message` | Persist user-visible conversation or durable decision notes only |
 | `featbit_release_decision_get_feature_flag` | Read the real FeatBit flag, revision, variations, and targeting for the experiment environment |
@@ -56,6 +57,13 @@ Feature flag mutation safety:
 - Before calling `featbit_release_decision_create_feature_flag`, `featbit_release_decision_update_feature_flag_targeting`, or `featbit_release_decision_toggle_feature_flag`, summarize the exact flag key, environment implied by the experiment, operation, rollout/toggle state, and rollback consequence, then ask the user for explicit approval.
 - Set `confirmedByUser: true` in the MCP request only after the user clearly approves that exact operation. Do not infer approval from earlier setup discussion, a stage transition, or an analysis recommendation.
 - If the user has not approved, stop before the MCP mutation and state the proposed operation awaiting approval.
+
+Run traffic configuration safety:
+
+- `featbit_release_decision_update_run_traffic` changes how experiment evidence is read; it does not mutate the live feature flag or who sees a variation.
+- On a draft run, configure traffic directly after explaining the intended analysis sample.
+- If a run is already `collecting`, `analyzing`, or `decided`, summarize the exact run, control/treatment roles, layer eligibility, and sampling rates, then ask the user to approve before passing `confirmedByUser: true`.
+- Choose `analysisSamplingPlan` include rates from the actual exposure distribution in the run window: `includeRate = desired analyzed users for that variation / observed served users for that variation * 100`, capped at `100`. If the live flag rollout changed after data was collected, start a new run window or collect fresh data instead of reusing the old distribution.
 
 Valid values:
 
@@ -375,6 +383,8 @@ Rules:
 
 - Redirect upstream if hypothesis or primary metric is missing.
 - If feature-flag MCP tools are available, read the bound flag before run setup and use the actual variation values for `controlVariant` and `treatmentVariant`; do not rely on manual text when the API can provide the source of truth.
+- Configure experiment traffic through `featbit_release_decision_update_run_traffic`, not the generic run update tool. The feature flag's actual served variation is the source of truth; layer eligibility only decides whether an exposure can enter this run, and analysis sampling is applied inside each served variation.
+- For gradual rollouts, do not force a 50/50 flag split just to make analysis equal. Use the observed served-variation counts in the run window to choose per-variation include rates. If the flag split has changed, do not assume historical exposure events match the current flag configuration.
 - When starting or resuming collection, verify the bound flag is enabled. If `isEnabled` is false and `featbit_release_decision_toggle_feature_flag` is available, enable it, read the flag back, and set `observationStart` no earlier than the enable time. If the toggle tool is missing, stop and ask the user to register the latest MCP tools instead of pretending collection has started.
 - Starting collection by enabling a flag still requires explicit user approval. Do not set `confirmedByUser: true` unless the user has approved that toggle in this turn or an immediately preceding approval response.
 - Resume an existing run for the same hypothesis instead of creating duplicates.
@@ -399,20 +409,28 @@ if not flag.isEnabled:
     })
     flag = MCP("featbit_release_decision_get_feature_flag", experimentId=experiment_id, key=flag_key)
     assert flag.isEnabled, "feature flag must be enabled before the run can collect data"
+MCP("featbit_release_decision_update_run_traffic", experimentId=experiment_id, runId=run_id, request={
+    "method": "bayesian_ab",
+    "controlVariant": control,
+    "treatmentVariant": treatment,
+    "assignmentUnitSelector": "user.keyId",
+    "layerKey": layer_key_or_null,
+    "layerTrafficPercent": layer_traffic_percent_or_100,
+    "analysisSamplingPlan": json.dumps([
+        {"variation": control, "role": "control", "includeRate": control_include_rate},
+        {"variation": treatment, "role": "treatment", "includeRate": treatment_include_rate},
+    ]),
+    "audienceFilters": audience_filters_json_or_null,
+})
 MCP("featbit_release_decision_update_run", experimentId=experiment_id, runId=run_id, update={
     "slug": slug,
     "status": "collecting",
     "hypothesis": hypothesis,
-    "method": "bayesian_ab",
     "primaryMetricEvent": primary_metric_event,
     "primaryMetricType": primary_metric_type,
     "primaryMetricAgg": primary_metric_agg,
-    "controlVariant": control,
-    "treatmentVariant": treatment,
     "guardrailEvents": guardrail_csv,
     "minimumSample": minimum_sample,
-    "trafficPercent": traffic_percent,
-    "trafficOffset": traffic_offset,
     "priorProper": prior_proper,
     "priorMean": prior_mean,
     "priorStddev": prior_stddev,

@@ -48,7 +48,7 @@ Instrumentation code
                       → writes inputData + analysisResult to run record
 ```
 
-Your only job is to make sure instrumentation sends events to `track-service` with the correct `envId`, `flagKey`, and event names. Once events land, the web app's `/analyze` endpoint handles the rest — no manual data assembly needed.
+Your job is to make sure instrumentation sends evaluation and metric events with the correct `envId`, `flagKey`, user key, variation, event names, timestamps, and any user properties required by `audienceFilters` or a custom `assignmentUnitSelector`. Once events land, `featbit_release_decision_analyze_run` handles the rest — no manual data assembly needed.
 
 ---
 
@@ -65,7 +65,14 @@ The web app calls track-service internally when `/analyze` runs. You do not call
   flagKey:     string,   // feature flag key
   metricEvent: string,   // event name to count as conversion
   startDate:   string,   // ISO 8601 — matches run's observationStart
-  endDate:     string    // ISO 8601 — matches run's observationEnd (or now if still open)
+  endDate:     string,   // ISO 8601 — matches run's observationEnd (or now if still open)
+  controlVariant?: string,
+  treatmentVariants?: string[],
+  audienceFilters?: string,
+  layerKey?: string,
+  assignmentUnitSelector?: string,
+  layerTrafficPercent?: number,
+  analysisSamplingPlan?: string
 }
 ```
 
@@ -89,20 +96,19 @@ The web app maps this response into `inputData` in the canonical shape before ru
 
 ## What `track-service` Receives from Instrumentation
 
-Track-service receives a `TrackPayload` for each user action:
+Track-service receives evaluation and metric payloads from the SDK/application. The exact wire shape can vary by SDK, but the analysis layer needs the same logical data:
 
 ```typescript
 // TrackPayload shape (from modules/track-service)
 {
   user: {
-    keyId: string   // the unique user identifier
+    keyId: string,              // the unique user identifier
+    properties?: object         // optional; required for custom audience/layer selectors
   },
   variations: Array<{
     flagKey:      string,    // feature flag key
     variant:      string,    // which variant the user got
-    timestamp:    string,    // ISO 8601
-    experimentId: string,    // experiment record ID (for filtering)
-    layerId:      string     // optional — mutual-exclusion layer
+    timestamp:    string     // ISO 8601
   }>,
   metrics: Array<{
     eventName:    string,    // must match primaryMetricEvent or guardrailEvents
@@ -113,7 +119,11 @@ Track-service receives a `TrackPayload` for each user action:
 }
 ```
 
-Each `track()` call in the FeatBit SDK sends this payload. The SDK wires `flagKey` and `variant` automatically from the active flag evaluation — your code only needs to provide the metric event name and value.
+Duplicate events are normal. The same user can evaluate the same flag many times and can fire the same metric many times in one observation window. Analysis uses the first valid included assignment for that user/assignment unit, then aggregates metric events that occur after that assignment according to the metric aggregation mode (`once`, `count`, `sum`, or `average`).
+
+If the run uses a custom `assignmentUnitSelector` or audience filter property, that property must be present on the evaluation/user event data. If it is missing, the event cannot pass that selector-dependent gate and may be excluded from analysis. Prefer `user.keyId` unless the custom property is known to be logged.
+
+The SDK wires `flagKey` and `variant` from the active flag evaluation. Your code must still ensure the metric event name and numeric value match the experiment definition.
 
 ---
 
@@ -125,6 +135,8 @@ If `/analyze` returns `{ "status": "no_data" }`:
 2. **Check metric events are landing** — verify `metrics[]` entries arrive with the correct `eventName`
 3. **Check the observation window** — `startDate` must match when the flag was enabled, not before
 4. **Check `envId`** — the environment ID in track-service must match the one in the experiment record
+5. **Check run traffic gates** — if `layerKey`, `assignmentUnitSelector`, `layerTrafficPercent`, or `audienceFilters` are set, confirm evaluation events contain the required user key/properties
+6. **Check sampling plan** — if include rates are low, confirm enough users remain after sampling
 
 If `/analyze` returns `{ "status": "no_data", "reason": "zero_users" }`:
 - Metric events are present but no users have been assigned to variants yet
@@ -141,4 +153,5 @@ After triggering analysis, read the `inputData` written back to the run record v
 - `n` values are plausible — not 0, not absurdly high
 - `k` ≤ `n` for every row
 - All metrics listed in `primaryMetricEvent` and `guardrailEvents` are present
-- If `n` values differ significantly between variants, run the SRM check before interpreting results
+- For sampled gradual-rollout analysis, `n` should reflect the configured per-variation include rates applied to the actual exposure distribution in the run window
+- If `n` values differ significantly from the intended analysis sample, check layer eligibility and sampling plan before interpreting results

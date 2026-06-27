@@ -47,7 +47,7 @@ When multiple experiments run on the same product surface, flag, or user pool, t
 **How it works:**
 - Total eligible traffic is partitioned into non-overlapping slices
 - Each experiment receives its own slice — no user appears in more than one experiment
-- Partitioning is done by hashing the dispatch key (e.g., `userId`) into buckets
+- Partitioning is represented as a run layer: `layerKey`, `assignmentUnitSelector`, and `layerTrafficPercent`
 
 **Traffic allocation:**
 - If 2 concurrent experiments need 50% each: split traffic into two halves
@@ -64,7 +64,7 @@ When multiple experiments run on the same product surface, flag, or user pool, t
 - When sequential design is acceptable (always prefer sequential if timing allows)
 
 **Implementation note:**
-FeatBit supports this via targeting rules with hashed user segments. Create non-overlapping segments (e.g., `hash(userId) % 100 < 50` for Experiment A, `≥ 50` for Experiment B) and assign each segment to its experiment's flag rules.
+FeatBit release-decision analysis supports this with run-level layer eligibility. Configure each run with the same `layerKey` and `assignmentUnitSelector`, then give each run a non-overlapping layer allocation. This only controls which exposures are eligible for each analysis run; the feature flag still decides the served variation.
 
 ---
 
@@ -98,19 +98,21 @@ In this system, a different `flagKey` means a different project. Orthogonal expe
 
 ---
 
-## System Constraints: One `flagKey` / One Project
+## System Constraints: Served Variation Is The Source Of Truth
 
-This system derives bucket assignment from `hashtext(user_key || flagKey)`. The `flagKey` is the hash seed. `layerId` is a WHERE-clause filter on evaluation records — it does not create an independent hash space.
+The analysis system does not reassign variants. It reads the actual FeatBit evaluation event and uses the variation that was served.
+
+Layer eligibility is a separate analysis gate. It partitions assignment units across concurrent runs, but it does not change the feature flag rollout and it does not decide control/treatment.
 
 ```
-One flagKey / one project
-  ├── Concurrent max?       → N mutually exclusive experiments (non-overlapping bucket ranges)
-  ├── Cannot do?            → Independent layering / orthogonal (requires different flagKey)
-  ├── Recommended form?     → One experiment + primary metric + guardrails
-  └── Multiple experiments? → Sequential iteration (Exp1 decides → Exp2 inherits learning)
+One product surface
+  ├── Sequential experiments?      → separate runs/windows, no layer needed
+  ├── Concurrent interacting runs? → same layerKey, non-overlapping layer allocations
+  ├── Different flags/surfaces?    → independent runs, layer optional
+  └── Same feature flag rollout?   → actual served variation remains the analysis arm
 ```
 
-Orthogonal and layered designs always require separate projects.
+If a custom `assignmentUnitSelector` is used for a layer, the required property must exist in evaluation event data. Otherwise those events cannot enter the layer-gated run.
 
 ---
 

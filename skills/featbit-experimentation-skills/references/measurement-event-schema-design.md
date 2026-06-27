@@ -26,14 +26,13 @@ The FeatBit SDK sends a `TrackPayload` to track-service for each user action. Th
 // TrackPayload — sent via FeatBit SDK track() calls
 {
   user: {
-    keyId: string        // stable user identifier — links events to flag evaluation records
+    keyId: string,       // stable user identifier — links events to flag evaluation records
+    properties?: object  // optional; required only when audience filters or custom assignment selectors use them
   },
   variations: Array<{    // populated automatically by the SDK from active flag evaluations
     flagKey:      string,
     variant:      string,
-    timestamp:    string,   // ISO 8601 UTC
-    experimentId: string,
-    layerId:      string    // optional — mutual-exclusion layer
+    timestamp:    string    // ISO 8601 UTC
   }>,
   metrics: Array<{       // your instrumentation code fills this
     eventName:    string,   // must match primaryMetricEvent or guardrailEvents in the experiment record
@@ -109,6 +108,9 @@ Counting API calls or page views when what matters is task completion.
 **Missing `user.keyId` linkage**  
 Events without a stable `keyId` cannot be joined to flag evaluation records. Experiment analysis becomes impossible.
 
+**Custom selector not present in event data**  
+If a run uses `assignmentUnitSelector` or an audience filter based on a custom user property, that property must be present in the evaluation/user event data. Otherwise those events are excluded from that selector-dependent analysis gate.
+
 **Server-time vs. client-time timestamps**  
 Use server-recorded time for consistency. Client timestamps can drift and skew cohort comparisons.
 
@@ -128,6 +130,7 @@ Before starting exposure, confirm:
 - [ ] Each guardrail event name is defined in `guardrailEvents` and fires with the correct `eventName`
 - [ ] Event fires after the variant is shown, not before
 - [ ] `user.keyId` in the payload matches the user key used in flag evaluation
+- [ ] Any custom property used by `assignmentUnitSelector` or audience filters is present in event data
 - [ ] `type` is set correctly: `"binary"` for conversion events, `"continuous"` for value events
 - [ ] `numericValue` is `1` for binary events; the measured value for continuous events
 - [ ] Events are firing in staging/test environment before production

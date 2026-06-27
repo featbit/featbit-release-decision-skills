@@ -1,209 +1,205 @@
 ---
 name: Experiment Data Spec
-description: DB schema reference for ExperimentRun fields, inputData format, analysisResult JSON examples, and field format standards.
+description: API schema reference for release-decision experiments, run traffic fields, inputData, and analysisResult JSON.
 ---
 
 # Experiment Data Spec
 
-Every experiment is a row in the `Experiment` table (Prisma schema), accessed via HTTP API.
-The database is the experiment. No local experiment files needed.
+Every experiment and run is stored in FeatBit API persistence. The MCP tools read and write that API state directly; do not create local experiment files or sync scripts.
 
 ---
 
-## Database Schema (Experiment model)
+## Experiment And Run Fields
 
-| Field | Type | Purpose |
+The experiment record owns the durable goal, intent, hypothesis, metrics, and learning. Each run owns one observation window and one analysis configuration.
+
+| Field | Scope | Purpose |
 |---|---|---|
-| `id` | String (cuid) | Primary key |
-| `slug` | String | Experiment identifier (kebab-case), unique within a project |
-| `hypothesis` | String? | The causal claim being tested |
-| `primaryMetricEvent` | String? | Event name for the primary metric |
-| `guardrailEvents` | String? | JSON array string of guardrail event names |
-| `controlVariant` | String? | Control variant value (e.g. "false", "baseline") |
-| `treatmentVariant` | String? | Treatment variant value (e.g. "true", "candidate") |
-| `minimumSample` | Int? | Validity floor per variant (see SKILL.md for computation) |
-| `observationStart` | String? | ISO 8601 date when the flag was enabled |
-| `observationEnd` | String? | ISO 8601 date when observation ended (null if still running) |
-| `priorProper` | Boolean (false) | Whether an informative prior is used |
-| `priorMean` | Float? | Expected relative lift (0 = no expected direction) |
-| `priorStddev` | Float? | Uncertainty around prior mean (0.3 = ±30% plausible range) |
-| `trafficPercent` | Float (100) | Bucket width — percentage of hash space this experiment occupies (1–100). Combined with `trafficOffset` for non-overlapping splits |
-| `trafficOffset` | Int (0) | Bucket start — offset into the [0,100) hash space. The experiment occupies [offset, offset+percent). Must satisfy offset+percent ≤ 100 |
-| `layerId` | String? | Optional filter tag. When set, the data server adds `AND layer_id = $4` to the exposure query — filtering to evaluations tagged with this ID at SDK track time. Does **not** create an independent hash space; two experiments with the same `flagKey` but different `layerId` still share the same hash-based bucket assignment |
-| `audienceFilters` | String? | JSON array of audience filter rules. Each entry: `{"property":"<user_prop>","op":"eq|neq|in|nin","value":"..."}` or `{"property":"...","op":"in|nin","values":["a","b"]}`. Null = all users eligible. The data server applies these filters when querying exposure+conversion data |
-| `method` | String? | Analysis method: `bayesian_ab` (default) or `bandit`. Controls how the data server samples exposure data. See Balanced Sampling section below |
-| `inputData` | String? | Collected metric data (JSON string — see format below) |
-| `analysisResult` | String? | Computed analysis output (JSON string — see format below) |
-| `status` | String ("draft") | `draft` / `collecting` / `analyzing` / `decided` |
-| `decision` | String? | Final decision category |
-| `decisionSummary` | String? | Plain-language action recommendation for non-technical readers |
-| `decisionReason` | String? | Technical rationale with data points |
-| `createdAt` | DateTime | Auto-generated |
-| `updatedAt` | DateTime | Auto-updated |
+| `id` | experiment | Experiment identifier passed to MCP tools |
+| `stage` | experiment | Lifecycle stage: `intent`, `hypothesis`, `implementing`, `measuring`, `learning` |
+| `goal` / `intent` / `hypothesis` | experiment | Product outcome and falsifiable causal claim |
+| `primaryMetricEvent` | experiment/run | Event name for the primary metric |
+| `guardrailEvents` | experiment/run | JSON/CSV list of guardrail event names |
+| `slug` | run | Stable run label, usually tied to the flag key and window |
+| `status` | run | `draft`, `collecting`, `analyzing`, `decided`, `archived` |
+| `observationStart` / `observationEnd` | run | Time window included in analysis |
+| `method` | run | `bayesian_ab` or `bandit` |
+| `controlVariant` | run | Actual FeatBit variation value treated as control |
+| `treatmentVariant` | run | Actual FeatBit variation value(s) treated as treatment |
+| `assignmentUnitSelector` | run traffic | Field used only for optional layer eligibility hashing, normally `user.keyId` |
+| `layerKey` | run traffic | Optional mutual-exclusion layer key. Empty means no layer eligibility gate |
+| `layerTrafficPercent` | run traffic | Percentage of assignment units eligible for this run within the layer |
+| `analysisSamplingPlan` | run traffic | JSON array defining per-served-variation include rates |
+| `audienceFilters` | run traffic | Optional JSON array of user-property filters applied before analysis |
+| `minimumSample` | run | Validity floor per analyzed variant |
+| `priorProper` / `priorMean` / `priorStddev` | run | Bayesian prior configuration |
+| `inputData` | run | Aggregated analysis input written by `featbit_release_decision_analyze_run` |
+| `analysisResult` | run | Computed analysis output written by `featbit_release_decision_analyze_run` |
 
-Rules for experiment fields:
-- `slug` must be unique within the project — typically derived from the flag key (e.g. `chat-cta-v2`)
-- `primaryMetricEvent` must exactly match the event name tracked via FeatBit SDK's `track()` call
-- `observationStart` is the date from which logs are included — do not backfill before the flag was enabled
-- `minimumSample` is a sanity floor, not a stopping rule
-- `priorProper: false` (default) = flat prior; `priorProper: true` = informative Gaussian prior
-- Do not change `primaryMetricEvent`, `controlVariant`, or `treatmentVariant` after data collection starts
-- `trafficPercent` defaults to 100 (all eligible traffic). The data server hashes `user_key || flagKey`, mods 100, and checks that the result falls within `[trafficOffset, trafficOffset + trafficPercent)`. When percent is 100, hash-based sampling is skipped entirely.
-- `trafficOffset` defaults to 0. For non-overlapping traffic splits, assign each experiment a contiguous range: e.g. Experiment A offset=0/percent=50 ([0,50)), Experiment B offset=50/percent=50 ([50,100)). Ensure offset + percent ≤ 100.
-- `layerId` is a WHERE-clause filter on `flag_evaluations.layer_id`, not a hash salt. It lets you restrict which logged evaluations are included (e.g., only evaluations made inside a specific product layer or surface). It does **not** produce independent random assignment — two experiments with the same `flagKey` but different `layerId` still derive their bucket positions from `hashtext(user_key || flagKey)`. True independent assignment (layering / orthogonal) requires a different `flagKey`, which means a different project. Leave null for sequential experiments.
-- `audienceFilters` applies server-side filtering on `user_props` when querying exposure and conversion data. Supported operators: `eq` (equals), `neq` (not equals), `in` (one of), `nin` (none of). Filters are AND-combined. Can be edited from the web UI at any time; changes only affect future queries, not historical data.
+Rules:
 
-### Balanced Sampling (method-conditional)
-
-The `method` field controls how the data server processes exposure data before analysis:
-
-- **`bayesian_ab`** (default): **Balanced sampling** — after collecting first-exposure rows, the data server ranks users within each variant by `ABS(hashtext(user_key))` and caps each variant at `MIN(count per variant)`. This ensures equal N across all arms, eliminating SRM (Sample Ratio Mismatch) noise from natural traffic imbalance. The hash-based ordering is deterministic — the same users are always selected.
-
-- **`bandit`**: **Pass-through** — no balanced sampling. Asymmetric allocation across variants is intentional (Thompson Sampling dynamically shifts traffic toward the winning arm). All first-exposure users are included in the analysis as-is.
-
-This is applied at the data server layer (both .NET `MetricCollector` and TypeScript `featbit.ts` adapter). The analysis scripts receive already-balanced data and do not need to account for unequal sample sizes in `bayesian_ab` mode.
+- Read real variation values with `featbit_release_decision_get_feature_flag` before configuring control/treatment roles.
+- Do not change `controlVariant`, `treatmentVariant`, or traffic sampling on a collecting/analyzing/decided run unless the user explicitly approves the evidence change.
+- `observationStart` must not be earlier than the time exposure really began.
+- `minimumSample` is a validity floor, not a stopping rule.
+- `audienceFilters` and run traffic settings affect analysis queries only. They do not mutate the live feature flag.
 
 ---
 
-## How Traffic Allocation Actually Works
+## Run Traffic Model
 
-Understanding what `trafficPercent` / `trafficOffset` actually filter helps avoid architecture mistakes.
+The analysis pipeline has three separate concepts. Keep them separate.
 
-### Data source: `flag_evaluations` mirrors the flag
+| Concept | Source of truth | What it decides |
+|---|---|---|
+| Feature flag targeting and split | FeatBit feature flag | Which variation the user actually receives |
+| Layer eligibility | Run traffic config | Whether an exposure is eligible to enter this run |
+| Analysis sampling | Run traffic config | What fraction of each actual served variation is analyzed |
 
-Every row in `flag_evaluations` is a copy of a real flag evaluation — the variant field holds exactly what FeatBit served to that user. The experimentation data server never re-assigns variants; it queries this table to count exposures and conversions. If the flag is 50/50, the table accumulates ~50% each. If the flag is 20/80, the table accumulates ~20% / ~80%.
+The server never reassigns variants during analysis. It reads evaluation events and uses the variation that FeatBit actually served.
 
-### Hash filter is a second independent filter
+### Layer Eligibility
 
-When `trafficPercent < 100`, the data server applies:
-```sql
-abs(hashtext(user_key || flagKey)) % 100 >= trafficOffset
-AND abs(hashtext(user_key || flagKey)) % 100 < trafficOffset + trafficPercent
+Layer eligibility is optional mutual-exclusion gating. It is useful when multiple concurrent runs share a surface and should not analyze the same assignment units.
+
+Fields:
+
+```json
+{
+  "layerKey": "homepage",
+  "assignmentUnitSelector": "user.keyId",
+  "layerTrafficPercent": 30
+}
 ```
-This hash is **independent** of FeatBit's own flag-evaluation hash. Selecting users in bucket `[0, 30%)` does not change the variant ratio — you get approximately the same variant proportions as the full set.
 
-### Flag split inheritance
+Semantics:
 
-| Scenario | Effective experiment sample |
+- `layerKey` names the layer. Empty/null disables the layer gate.
+- `assignmentUnitSelector` selects the assignment unit from each evaluation event. Use `user.keyId` unless the event payload reliably contains the custom property needed for the layer.
+- `layerTrafficPercent` is the eligible percentage of assignment units for this run, from `0` to `100`.
+- The layer gate does not decide control/treatment. It only says whether this exposure can be analyzed by this run.
+- If a custom selector is missing from an event, that event cannot be assigned to the layer and is excluded from layer-gated analysis. Prefer `user.keyId` unless custom properties are known to be present in event data.
+
+### Analysis Sampling
+
+Analysis sampling runs after layer/audience filtering and after reading the actual served variation. It samples inside each served variation.
+
+Use `featbit_release_decision_update_run_traffic`:
+
+```json
+{
+  "method": "bayesian_ab",
+  "controlVariant": "control_current",
+  "treatmentVariant": "treatment_dotnet",
+  "assignmentUnitSelector": "user.keyId",
+  "layerKey": null,
+  "layerTrafficPercent": 100,
+  "analysisSamplingPlan": "[{\"variation\":\"control_current\",\"role\":\"control\",\"includeRate\":100},{\"variation\":\"treatment_dotnet\",\"role\":\"treatment\",\"includeRate\":100}]"
+}
+```
+
+Fields inside `analysisSamplingPlan`:
+
+| Field | Meaning |
 |---|---|
-| Flag 50/50, `trafficPercent=100` (default) | Hash filter skipped entirely — all evaluations included; bayesian trims to equal N |
-| Flag 50/50, `trafficPercent=50, offset=0` | Half the users; still ~50/50 within the window |
-| Flag 20/80, `trafficPercent=100` | All evaluations included; bayesian trims both groups to ~20% of total |
-| Flag 20/80, `trafficPercent=30, offset=0` | ~6% total as variant A, ~24% as variant B; bayesian trims both to ~6% |
+| `variation` | Actual FeatBit variation value |
+| `role` | `control`, `treatment`, `holdout`, or `exclude` |
+| `includeRate` | Percentage of users in that actual served variation to include, from `0` to `100` |
 
-### Gradual rollout and unequal flag splits are intentional
+Examples:
 
-An unequal variant split (e.g., 10% treatment / 90% control) is not a misconfiguration — it is a deliberate risk-control decision: the product team limits exposure to the new experience until the experiment validates it. The correct response is **not** to change the flag split to 50/50; doing so defeats the purpose of gradual rollout.
-
-The three layers of traffic control are independent and each serves a different purpose:
-
-| Layer | Who decides | Purpose |
+| Live flag split | Desired analysis sample | Sampling plan |
 |---|---|---|
-| **Flag split** (e.g., 20/80) | Product / ops | Risk control — how many users see the new experience |
-| **`trafficPercent` / `trafficOffset`** | Experiment design | Isolation — carve a sub-pool from the already-exposed users for mutual exclusion between concurrent experiments |
-| **Bayesian balanced sampling** | Data server (automatic) | Statistical fairness — trim both groups to equal N, eliminating SRM noise |
+| 50/50 control/treatment | Analyze all traffic | control `100`, treatment `100` |
+| 90/10 control/treatment | Analyze 10% total control + all treatment | control `11.111111`, treatment `100` |
+| 80/20 control/treatment | Analyze 20% total control + all treatment | control `25`, treatment `100` |
+| 80/10/10 control/t1/t2 | Analyze 10% total per arm | control `12.5`, t1 `100`, t2 `100` |
+| Bandit 70/10/10/10 | Analyze actual served traffic | every arm `100` |
 
-**Practical consequence of a small treatment group:** The treatment-side N is the population ceiling. A 10% rollout means you need to wait longer for sufficient N than a 50% rollout. `minimumSample` should be set conservatively, and the observation window planned accordingly. Running mutual-exclusion experiments on top of a small rollout further reduces each experiment's sub-pool — accept a longer timeline or run sequentially.
+These are examples, not defaults. Compute `includeRate` from the observed served-variation distribution in the run window. If a flag was changed from 90/10 to 80/20 after data was already collected, old 90/10 exposure events still analyze as 90/10 until a new window or fresh data is used.
 
-**When an unequal split IS a problem:** If someone accidentally sets the flag to 2/98 while intending 50/50, bayesian balanced sampling will trim both groups to 2% of total — discarding 98% of control-side data. In that case, fix the flag configuration, not the experiment parameters.
+---
 
-### One `flagKey` = one hash space = one project constraint
+## Duplicate Events Are Expected
 
-```
-One flagKey / one project
-  ├── Concurrent max?      → N mutually exclusive experiments (non-overlapping bucket ranges)
-  ├── Cannot do?           → Independent layering / orthogonal (requires different flagKey)
-  ├── Recommended form?    → One experiment + primary metric + guardrails
-  └── Multiple experiments? → Sequential iteration (Exp1 decides → Exp2 inherits learning)
-```
+Within an observation window:
 
-For **orthogonal** experiments (same user in two independent experiments simultaneously) or **true layering** (independent random assignment per layer), each experiment layer needs its own hash seed — which in this system means a different `flagKey`, therefore a different project.
+- The same user can produce multiple evaluation events for the same flag.
+- The same user can produce multiple metric events for the same metric.
+
+The analysis service handles this by:
+
+1. Reading evaluation events within the run window.
+2. Applying audience filters and optional layer eligibility.
+3. Applying the sampling plan inside each actual served variation.
+4. Selecting the first valid assignment per assignment unit and variation role.
+5. Aggregating metric events that occur after that assignment.
+
+Metric aggregation still follows the metric definition:
+
+| Aggregation | Meaning |
+|---|---|
+| `once` | User counts as converted if the event happens at least once after assignment |
+| `count` | Count all matching events after assignment |
+| `sum` | Sum numeric values after assignment |
+| `average` | Average numeric values after assignment |
 
 ---
 
 ## `inputData` Format
 
-Holds aggregated exposure and conversion counts for every metric and variant. Written by the FeatBit API analysis flow after `featbit_release_decision_analyze_run` queries stats.
+`inputData` is written by `featbit_release_decision_analyze_run` after querying live stats.
 
 ```json
 {
   "metrics": {
     "cta_clicked": {
-      "false": {"n": 487, "k": 41},
-      "true":  {"n": 513, "k": 67}
+      "control_current": {"n": 773, "k": 39},
+      "treatment_dotnet": {"n": 770, "k": 52}
     },
-    "chat_opened": {
-      "false": {"n": 487, "k": 38},
-      "true":  {"n": 513, "k": 41}
+    "client_error": {
+      "control_current": {"n": 773, "k": 3},
+      "treatment_dotnet": {"n": 770, "k": 4}
     }
   }
 }
 ```
 
 Rules:
-- Outer keys are event names — must match `primaryMetricEvent` and `guardrailEvents` in the experiment record
-- Inner keys are variant values — must match `controlVariant` and `treatmentVariant` in the experiment record
-- `n` = unique users exposed to that variant in the observation window
-- `k` = unique users who fired the event at least once, out of those `n`
-- Source: see `workspace-data-source-guide.md` for how events land in track-service
+
+- Outer keys match `primaryMetricEvent` and `guardrailEvents`.
+- Inner keys match actual FeatBit variation values configured as control/treatment.
+- `n` is the analyzed user/assignment-unit count for that variation.
+- `k` is the aggregated metric result for that variation.
+- Do not edit `inputData` by hand when live stats are available; rerun analysis.
 
 ---
 
 ## `analysisResult` Format
 
-Written by the FeatBit API analysis flow (Bayesian or Bandit selected from the run's `method` field). Example output:
+`analysisResult` is written by the API analysis flow. Example:
 
 ```json
 {
   "type": "bayesian",
-  "experiment": "chat-cta-v2",
-  "computed_at": "2026-03-15T09:00:00Z",
-  "window": { "start": "2026-03-01", "end": "2026-03-15" },
-  "control": "false",
-  "treatments": ["true"],
-  "prior": "flat/improper (data-only)",
+  "experiment": "homepage-h1",
+  "computed_at": "2026-06-27T09:00:00Z",
+  "window": { "start": "2026-06-25T00:00:00Z", "end": "2026-06-27T09:00:00Z" },
+  "control": "control_current",
+  "treatments": ["treatment_dotnet"],
   "srm": {
-    "chi2_p_value": 0.4821,
+    "chi2_p_value": 0.48,
     "ok": true,
-    "observed": { "false": 487, "true": 513 }
+    "observed": { "control_current": 773, "treatment_dotnet": 770 }
   },
   "primary_metric": {
     "event": "cta_clicked",
-    "metric_type": "proportion",
     "rows": [
-      { "variant": "false", "n": 487, "conversions": 41, "rate": 0.0842, "is_control": true },
-      { "variant": "true", "n": 513, "conversions": 67, "rate": 0.1306, "rel_delta": 0.5512, "ci_lower": 0.2845, "ci_upper": 0.8179, "p_win": 0.973, "risk_ctrl": 0.0412, "risk_trt": 0.0012, "is_control": false }
-    ],
-    "verdict": "strong signal → adopt treatment"
-  },
-  "guardrails": [
-    {
-      "event": "chat_opened",
-      "metric_type": "proportion",
-      "rows": [
-        { "variant": "false", "n": 487, "conversions": 38, "rate": 0.078, "is_control": true },
-        { "variant": "true", "n": 513, "conversions": 41, "rate": 0.0799, "rel_delta": 0.0244, "ci_lower": -0.0981, "ci_upper": 0.1469, "p_harm": 0.459, "risk_ctrl": 0.0089, "risk_trt": 0.0084, "is_control": false }
-      ],
-      "verdict": "guardrail healthy"
-    }
-  ],
-  "sample_check": {
-    "minimum_per_variant": 487,
-    "ok": true,
-    "variants": { "false": 487, "true": 513 }
+      { "variant": "control_current", "n": 773, "conversions": 39, "rate": 0.0505, "is_control": true },
+      { "variant": "treatment_dotnet", "n": 770, "conversions": 52, "rate": 0.0675, "rel_delta": 0.337, "p_win": 0.94, "is_control": false }
+    ]
   }
 }
 ```
 
-Do not edit `analysisResult` by hand. Re-run the analysis script if data changes.
-
----
-
-## Naming the Experiment Slug
-
-Use `<flag-key>-<short-description>`, e.g.:
-- `chat-cta-v2`
-- `homepage-h1-ai-risk`
-- `hero-deploy-buttons`
-
-Kebab-case only. Matches the flag key prefix where possible.
+Do not edit `analysisResult` by hand. Re-run `featbit_release_decision_analyze_run` when data or run configuration changes.

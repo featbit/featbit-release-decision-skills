@@ -23,6 +23,8 @@ Call `featbit_release_decision_analyze_run` with `experimentId`, `runId`, and `f
 
 The `analysisResult` returned (and stored on the run record) includes: `n`, `conv`, `rate`, `rel Δ`, `95% credible CI`, `P(win)`, `risk[ctrl]`, `risk[trt]`.
 
+`n` is the analyzed sample after run traffic gates: audience filters, optional layer eligibility, and per-served-variation `analysisSamplingPlan`. It is not automatically forced to equal raw flag traffic. Choose each `includeRate` from the actual exposure distribution inside the run window: desired analyzed users for that variation divided by observed served users for that variation, capped at 100%.
+
 ---
 
 ### Pattern 2 — Continuous metric (revenue, session duration, score)
