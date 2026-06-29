@@ -42,15 +42,20 @@ Required MCP tools:
 | `featbit_release_decision_update_metrics` | Write primary metric and guardrails |
 | `featbit_release_decision_create_run` | Create an experiment run |
 | `featbit_release_decision_update_run` | Update run setup, status, decision, and learning fields |
-| `featbit_release_decision_update_run_traffic` | Configure a run's analysis method, control/treatment roles, layer eligibility, and per-variation analysis sampling |
+| `featbit_release_decision_update_run_traffic` | Configure a run's experiment traffic assignment: analysis method, control/treatment roles, layer id/key, bucket slice, assignment unit, audience filters, allocation plan, and per-variation analysis sampling |
 | `featbit_release_decision_analyze_run` | Run server-side analysis and persist `inputData` / `analysisResult` |
-| `featbit_release_decision_add_message` | Persist user-visible conversation or durable decision notes only |
+| `featbit_release_decision_list_layers` | List registered release-decision layers for the experiment environment |
+| `featbit_release_decision_create_layer` | Create a registered layer after explicit user approval |
+| `featbit_release_decision_update_layer` | Update a registered layer after explicit user approval |
+| `featbit_release_decision_archive_layer` | Archive a registered layer after explicit user approval |
 | `featbit_release_decision_get_feature_flag` | Read the real FeatBit flag, revision, variations, and targeting for the experiment environment |
 | `featbit_release_decision_create_feature_flag` | Create a FeatBit-managed feature flag after the exposure contract is complete and the user explicitly approves |
 | `featbit_release_decision_update_feature_flag_targeting` | Update flag targeting/rollout directly, or create a change request when `useChangeRequest` or reviewers are provided, after explicit user approval |
 | `featbit_release_decision_toggle_feature_flag` | Enable or disable the FeatBit flag after targeting is configured, or during pause/rollback execution, after explicit user approval |
 
 The MCP client configuration must provide normal FeatBit auth headers: `Authorization`, `Organization`, and `Workspace`. Do not ask for or pass a per-experiment access token.
+
+For the canonical tool inventory and step-by-step usage rules, read [references/mcp-tool-usage.md](references/mcp-tool-usage.md) before executing MCP-backed experiment work.
 
 Feature flag mutation safety:
 
@@ -62,8 +67,15 @@ Run traffic configuration safety:
 
 - `featbit_release_decision_update_run_traffic` changes how experiment evidence is read; it does not mutate the live feature flag or who sees a variation.
 - On a draft run, configure traffic directly after explaining the intended analysis sample.
+- Use `featbit_release_decision_list_layers` before assigning a run to a layer. If the layer does not exist, create it only after the user explicitly approves.
+- Use `sliceStart` and `sliceEnd` for layer bucket ranges such as `30` to `60`; `layerTrafficPercent` is the slice width. Avoid legacy `trafficPercent` / `trafficOffset` unless preserving older run behavior.
 - If a run is already `collecting`, `analyzing`, or `decided`, summarize the exact run, control/treatment roles, layer eligibility, and sampling rates, then ask the user to approve before passing `confirmedByUser: true`.
 - Choose `analysisSamplingPlan` include rates from the actual exposure distribution in the run window: `includeRate = desired analyzed users for that variation / observed served users for that variation * 100`, capped at `100`. If the live flag rollout changed after data was collected, start a new run window or collect fresh data instead of reusing the old distribution.
+
+Layer mutation safety:
+
+- Creating, updating, or archiving a registered layer can affect future mutual-exclusion assignments. Summarize the layer name, key, assignment unit selector, status, and active run impact before asking for approval.
+- Set `confirmedByUser: true` only after approval for that exact layer operation.
 
 Valid values:
 
